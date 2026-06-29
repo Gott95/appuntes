@@ -11,12 +11,13 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { useAuthContext } from '@/lib/auth-context';
 import { Colors } from '@/lib/theme';
 
 export default function LoginScreen() {
   const { signIn } = useAuthContext();
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -31,6 +32,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signIn(email.trim(), password);
+      router.replace('/(auth)/preload');
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Correo o contraseña incorrectos');
     } finally {

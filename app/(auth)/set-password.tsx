@@ -11,11 +11,13 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useAuthContext } from '@/lib/auth-context';
 import { Colors } from '@/lib/theme';
 
 export default function SetPasswordScreen() {
   const { setPassword: updatePassword } = useAuthContext();
+  const router = useRouter();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -34,7 +36,7 @@ export default function SetPasswordScreen() {
     setLoading(true);
     try {
       await updatePassword(password);
-      Alert.alert('Listo', 'Tu contraseña ha sido actualizada');
+      router.replace('/(auth)/preload');
     } catch (error: any) {
       Alert.alert('Error', error.message || 'No se pudo actualizar la contraseña');
     } finally {

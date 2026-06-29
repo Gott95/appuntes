@@ -31,10 +31,15 @@ function RootLayoutNav() {
     if (!session && !inAuthGroup) {
       router.replace('/(auth)/login');
     } else if (session && inAuthGroup) {
+      const currentScreen = segments[1];
       if (profile && !profile.has_set_password) {
-        router.replace('/(auth)/set-password');
+        if (currentScreen !== 'set-password') {
+          router.replace('/(auth)/set-password');
+        }
       } else if (profile && profile.has_set_password) {
-        router.replace('/(tabs)');
+        if (currentScreen !== 'preload') {
+          router.replace('/(auth)/preload');
+        }
       }
     } else if (session && !inAuthGroup && profile && !profile.has_set_password) {
       router.replace('/(auth)/set-password');
