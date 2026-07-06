@@ -1,11 +1,16 @@
 import { Linking, Platform } from 'react-native';
 
-let Notifications: any = null;
-try {
-  Notifications = require('expo-notifications');
-} catch {}
+async function getNotifications() {
+  try {
+    const mod = await import('expo-notifications');
+    return mod;
+  } catch {
+    return null;
+  }
+}
 
 export async function requestNotificationPermission(): Promise<boolean> {
+  const Notifications = await getNotifications();
   if (!Notifications) return false;
 
   try {
@@ -27,6 +32,7 @@ export async function openNotificationSettings(): Promise<void> {
 }
 
 export async function sendBudgetAlert(_weekNumber: number, _spent: number, _budget: number): Promise<void> {
+  const Notifications = await getNotifications();
   if (!Notifications) return;
 
   try {
