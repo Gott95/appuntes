@@ -44,6 +44,7 @@ interface FixedExpense {
   id: string;
   name: string;
   amount: number;
+  category_id: string | null;
   is_active: boolean;
   categories: { name: string; icon: string } | null;
 }
@@ -66,6 +67,8 @@ export default function SettingsScreen() {
   const [salaryEntries, setSalaryEntries] = useState<SalaryEntry[]>([]);
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
   const [showAddExpense, setShowAddExpense] = useState(false);
+  const [showEditExpense, setShowEditExpense] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<FixedExpense | null>(null);
   const [showAddCategory, setShowAddCategory] = useState(false);
   const [showAddSalary, setShowAddSalary] = useState(false);
   const [showAddGoal, setShowAddGoal] = useState(false);
@@ -179,6 +182,42 @@ export default function SettingsScreen() {
         },
       },
     ]);
+  };
+
+  const handleEditExpense = (expense: FixedExpense) => {
+    setEditingExpense(expense);
+    setNewExpenseName(expense.name);
+    setNewExpenseAmount(expense.amount.toString());
+    setSelectedCategory(expense.category_id || null);
+    setShowEditExpense(true);
+  };
+
+  const handleSaveEditExpense = async () => {
+    if (!editingExpense || !newExpenseName.trim() || !newExpenseAmount) return;
+
+    const amount = parseFloat(newExpenseAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Error', 'Ingresa un monto válido');
+      return;
+    }
+
+    const { error } = await (supabase as any).from('fixed_expenses').update({
+      name: newExpenseName.trim(),
+      amount,
+      category_id: selectedCategory,
+    }).eq('id', editingExpense.id);
+
+    if (error) {
+      Alert.alert('Error', 'No se pudo guardar');
+      return;
+    }
+
+    setNewExpenseName('');
+    setNewExpenseAmount('');
+    setSelectedCategory(null);
+    setEditingExpense(null);
+    setShowEditExpense(false);
+    fetchData();
   };
 
   const handleAddCategory = async () => {
@@ -525,6 +564,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               key={expense.id}
               style={[styles.listItem, { borderBottomColor: colors.borderLight }]}
+              onPress={() => handleEditExpense(expense)}
               onLongPress={() => handleDeleteExpense(expense.id)}
             >
               <View style={styles.itemLeft}>
@@ -736,6 +776,64 @@ export default function SettingsScreen() {
                 <Text style={[styles.modalButtonTextCancel, { color: colors.textSecondary }]}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalButtonConfirm, { backgroundColor: colors.primary }]} onPress={handleAddExpense}>
+                <Text style={[styles.modalButtonTextConfirm, { color: colors.surface }]}>Guardar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Edit Expense Modal */}
+      <Modal visible={showEditExpense} transparent animationType="slide">
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowEditExpense(false)} />
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Editar gasto fijo</Text>
+            <TextInput
+              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
+              value={newExpenseName}
+              onChangeText={setNewExpenseName}
+              placeholder="Nombre del gasto"
+              placeholderTextColor={colors.textTertiary}
+            />
+            <TextInput
+              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
+              value={newExpenseAmount}
+              onChangeText={setNewExpenseAmount}
+              placeholder="Monto mensual"
+              placeholderTextColor={colors.textTertiary}
+              keyboardType="numeric"
+            />
+            <Text style={[styles.modalLabel, { color: colors.textSecondary }]}>Categoría</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
+              {fixedCategories.map((cat) => (
+                <TouchableOpacity
+                  key={cat.id}
+                  style={[
+                    styles.categoryChip,
+                    { backgroundColor: selectedCategory === cat.id ? colors.primary : colors.surfaceVariant },
+                  ]}
+                  onPress={() =>
+                    setSelectedCategory(selectedCategory === cat.id ? null : cat.id)
+                  }
+                >
+                  <Text style={[styles.categoryChipText, { color: selectedCategory === cat.id ? colors.surface : colors.text }]}>
+                    {cat.icon} {cat.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButtonCancel, { backgroundColor: colors.surfaceVariant }]}
+                onPress={() => setShowEditExpense(false)}
+              >
+                <Text style={[styles.modalButtonTextCancel, { color: colors.textSecondary }]}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButtonConfirm, { backgroundColor: colors.primary }]} onPress={handleSaveEditExpense}>
                 <Text style={[styles.modalButtonTextConfirm, { color: colors.surface }]}>Guardar</Text>
               </TouchableOpacity>
             </View>
