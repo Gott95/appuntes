@@ -377,10 +377,12 @@ export async function getMonthlyPaidInstallments(userId: string, month: number, 
 
   const { data } = await supabase
     .from('installment_payments')
-    .select('paid_amount, installment_plans!inner(user_id)')
+    .select('paid_amount, paid_date, due_date, installment_plans!inner(user_id)')
     .eq('status', 'paid')
-    .gte('due_date', startDate)
-    .lte('due_date', endDate);
+    .gte('paid_date', startDate)
+    .lte('paid_date', endDate);
+
+  console.log('getMonthlyPaidInstallments:', { month, year, startDate, endDate, dataCount: data?.length, data });
 
   if (!data) return 0;
 
