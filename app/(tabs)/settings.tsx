@@ -105,9 +105,7 @@ export default function SettingsScreen() {
       supabase
         .from('salary_entries')
         .select('*')
-        .eq('user_id', user.id)
-        .eq('month', month)
-        .eq('year', year),
+        .eq('user_id', user.id),
       getSavingsGoals(user.id),
       getVaultEntries(user.id),
       getCurrentBalance(user.id),
@@ -272,10 +270,8 @@ export default function SettingsScreen() {
         user_id: user.id,
         job_name: newJobName.trim(),
         amount,
-        month,
-        year,
       } as any,
-      { onConflict: 'user_id,job_name,month,year' }
+      { onConflict: 'user_id,job_name' }
     );
 
     if (error) {
@@ -510,7 +506,7 @@ export default function SettingsScreen() {
       {/* Salary Management */}
       <View style={[styles.card, { backgroundColor: colors.surface }]}>
         <View style={styles.cardHeader}>
-          <Text style={[styles.cardTitle, { color: colors.text }]}>Salario - {getMonthFullName(month)}</Text>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>Trabajos / Salario</Text>
           <TouchableOpacity onPress={() => setShowAddSalary(true)}>
             <Text style={[styles.addButton, { color: colors.primary }]}>+ Agregar</Text>
           </TouchableOpacity>

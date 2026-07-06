@@ -21,12 +21,6 @@ import {
 } from '@/lib/savings';
 import { getMonthlyInstallmentsTotal, PlanWithPayments, getAllPlansWithPayments } from '@/lib/installments';
 
-interface SalaryEntry {
-  id: string;
-  job_name: string;
-  amount: number;
-}
-
 interface FixedExpense {
   id: string;
   name: string;
@@ -49,7 +43,6 @@ export default function DashboardScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const [refreshing, setRefreshing] = useState(false);
-  const [salaryEntries, setSalaryEntries] = useState<SalaryEntry[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [monthlyBudget, setMonthlyBudget] = useState(0);
@@ -64,25 +57,21 @@ export default function DashboardScreen() {
   const [activeInstallmentPlans, setActiveInstallmentPlans] = useState<PlanWithPayments[]>([]);
   const router = useRouter();
 
-  const totalSalary = salaryEntries.reduce((sum, e) => sum + e.amount, 0);
   const totalFixed = fixedExpenses.reduce((sum, e) => sum + e.amount, 0);
   const totalVariable = transactions
     .filter((t) => t.type === 'expense')
     .reduce((sum, t) => sum + t.amount, 0);
-  const balance = totalSalary - totalFixed - totalVariable;
+  const totalIncome = transactions
+    .filter((t) => t.type === 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+  const balance = totalIncome - totalFixed - totalVariable;
 
   const fetchData = useCallback(async () => {
     if (!user) return;
 
     const { startDate, endDate } = getMonthRange(month, year);
 
-    const [salaryRes, fixedRes, transRes] = await Promise.all([
-      supabase
-        .from('salary_entries')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('month', month)
-        .eq('year', year),
+    const [fixedRes, transRes] = await Promise.all([
       supabase
         .from('fixed_expenses')
         .select('*, categories(name, icon)')
@@ -98,7 +87,6 @@ export default function DashboardScreen() {
         .limit(10),
     ]);
 
-    setSalaryEntries(salaryRes.data || []);
     setFixedExpenses(fixedRes.data || []);
     setTransactions(transRes.data || []);
 
@@ -201,9 +189,9 @@ export default function DashboardScreen() {
         <View style={styles.summaryRow}>
           <View style={[styles.summaryItem, { backgroundColor: colors.surface }]}>
             <Text style={styles.summaryIcon}>💰</Text>
-            <Text style={[styles.summaryLabel, { color: colors.textTertiary }]}>Salario</Text>
+            <Text style={[styles.summaryLabel, { color: colors.textTertiary }]}>Ingresos</Text>
             <Text style={[styles.summaryAmount, { color: colors.income }]}>
-              {formatCurrency(totalSalary)}
+              {formatCurrency(totalIncome)}
             </Text>
           </View>
           <View style={[styles.summaryItem, { backgroundColor: colors.surface }]}>
@@ -220,24 +208,6 @@ export default function DashboardScreen() {
               {formatCurrency(totalVariable)}
             </Text>
           </View>
-        </View>
-
-        {/* Salary Section */}
-        <View style={[styles.section, { backgroundColor: colors.surface }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Salario - {getMonthFullName(month)}</Text>
-          {salaryEntries.length === 0 ? (
-            <Text style={[styles.emptyText, { color: colors.textTertiary }]}>Sin entradas este mes</Text>
-          ) : (
-            salaryEntries.map((entry) => (
-              <View
-                key={entry.id}
-                style={[styles.listItem, { borderBottomColor: colors.borderLight }]}
-              >
-                <Text style={[styles.itemName, { color: colors.text }]}>{entry.job_name}</Text>
-                <Text style={[styles.itemAmount, { color: colors.text }]}>{formatCurrency(entry.amount)}</Text>
-              </View>
-            ))
-          )}
         </View>
 
         {/* Fixed Expenses Section */}
