@@ -66,7 +66,7 @@ export default function DashboardScreen() {
   const totalIncome = transactions
     .filter((t) => t.type === 'income')
     .reduce((sum, t) => sum + t.amount, 0);
-  const balance = totalSalary + totalIncome - totalFixed - totalVariable - installmentsTotal - savingsThisMonth;
+  const balance = totalSalary;
 
   const fetchData = useCallback(async () => {
     if (!user) return;
