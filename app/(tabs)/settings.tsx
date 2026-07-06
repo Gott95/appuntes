@@ -21,7 +21,7 @@ import { useAppUpdate } from '@/lib/update-context';
 import { formatCurrency, getCurrentMonth, getMonthFullName } from '@/lib/utils';
 import { Colors } from '@/lib/theme';
 import { getMonthlyBudget, setMonthlyBudget } from '@/lib/budget';
-import { requestNotificationPermission } from '@/lib/notifications';
+import { requestNotificationPermission, openNotificationSettings } from '@/lib/notifications';
 import {
   SavingsGoal,
   getSavingsGoals,
@@ -31,6 +31,13 @@ import {
   GOAL_ICONS,
   GOAL_COLORS,
 } from '@/lib/savings';
+import {
+  VaultEntry,
+  getVaultEntries,
+  getCurrentBalance,
+  saveVaultEntry,
+  deleteVaultEntry,
+} from '@/lib/vault';
 
 interface FixedExpense {
   id: string;
@@ -75,11 +82,16 @@ export default function SettingsScreen() {
   const [newGoalTarget, setNewGoalTarget] = useState('');
   const [newGoalIcon, setNewGoalIcon] = useState('🎯');
   const [newGoalColor, setNewGoalColor] = useState('#0891b2');
+  const [vaultEntries, setVaultEntries] = useState<VaultEntry[]>([]);
+  const [vaultBalance, setVaultBalance] = useState(0);
+  const [showVaultAdjust, setShowVaultAdjust] = useState(false);
+  const [vaultAdjustAmount, setVaultAdjustAmount] = useState('');
+  const [vaultAdjustNote, setVaultAdjustNote] = useState('');
 
   const fetchData = useCallback(async () => {
     if (!user) return;
 
-    const [fixedRes, catRes, budget, salaryRes, goals] = await Promise.all([
+    const [fixedRes, catRes, budget, salaryRes, goals, vaultRes, balance] = await Promise.all([
       supabase
         .from('fixed_expenses')
         .select('*, categories(name, icon)')
@@ -97,6 +109,8 @@ export default function SettingsScreen() {
         .eq('month', month)
         .eq('year', year),
       getSavingsGoals(user.id),
+      getVaultEntries(user.id),
+      getCurrentBalance(user.id),
     ]);
 
     setFixedExpenses(fixedRes.data || []);
@@ -105,6 +119,8 @@ export default function SettingsScreen() {
     setBudgetInput(budget > 0 ? String(budget) : '');
     setSalaryEntries(salaryRes.data || []);
     setSavingsGoals(goals);
+    setVaultEntries(vaultRes);
+    setVaultBalance(balance);
   }, [user, month, year]);
 
   useFocusEffect(
@@ -228,10 +244,18 @@ export default function SettingsScreen() {
 
   const handleRequestNotifications = async () => {
     const granted = await requestNotificationPermission();
-    Alert.alert(
-      granted ? 'Notificaciones activadas' : 'Notificaciones denegadas',
-      granted ? 'Recibirás alertas cuando excedas tu presupuesto semanal.' : 'Activa las notificaciones desde la configuración del sistema.'
-    );
+    if (granted) {
+      Alert.alert('Notificaciones activadas', 'Recibirás alertas cuando excedas tu presupuesto semanal.');
+    } else {
+      Alert.alert(
+        'Notificaciones denegadas',
+        'Activa las notificaciones desde la configuración del sistema.',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          { text: 'Abrir ajustes', onPress: () => openNotificationSettings() },
+        ]
+      );
+    }
   };
 
   const handleAddSalary = async () => {
@@ -323,6 +347,36 @@ export default function SettingsScreen() {
         style: 'destructive',
         onPress: async () => {
           await deleteSavingsGoal(goal.id);
+          fetchData();
+        },
+      },
+    ]);
+  };
+
+  const handleSaveVaultAdjust = async () => {
+    if (!user || !vaultAdjustAmount) return;
+
+    const amount = parseFloat(vaultAdjustAmount);
+    if (isNaN(amount)) {
+      Alert.alert('Error', 'Ingresa un monto válido');
+      return;
+    }
+
+    await saveVaultEntry(user.id, month, year, amount, vaultAdjustNote || 'Ajuste manual', true);
+    setVaultAdjustAmount('');
+    setVaultAdjustNote('');
+    setShowVaultAdjust(false);
+    fetchData();
+  };
+
+  const handleDeleteVaultEntry = (entry: VaultEntry) => {
+    Alert.alert('Eliminar registro', `¿Eliminar el registro de ${getMonthFullName(entry.month)} ${entry.year}?`, [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteVaultEntry(entry.id);
           fetchData();
         },
       },
@@ -549,6 +603,46 @@ export default function SettingsScreen() {
         )}
       </View>
 
+      {/* Vault / Bóveda */}
+      <View style={[styles.card, { backgroundColor: colors.surface }]}>
+        <View style={styles.cardHeader}>
+          <Text style={[styles.cardTitle, { color: colors.text }]}>Bóveda</Text>
+          <TouchableOpacity onPress={() => {
+            setVaultAdjustAmount(String(vaultBalance));
+            setShowVaultAdjust(true);
+          }}>
+            <Text style={[styles.addButton, { color: colors.primary }]}>Ajustar</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={[styles.vaultBalanceCard, { backgroundColor: colors.primary + '10', borderLeftColor: colors.primary }]}>
+          <Text style={[styles.vaultBalanceLabel, { color: colors.textSecondary }]}>Total ahorrado</Text>
+          <Text style={[styles.vaultBalanceAmount, { color: colors.text }]}>{formatCurrency(vaultBalance)}</Text>
+        </View>
+        {vaultEntries.length === 0 ? (
+          <Text style={[styles.emptyText, { color: colors.textTertiary }]}>Sin registros. Ajusta el saldo inicial.</Text>
+        ) : (
+          vaultEntries.slice(0, 6).map((entry) => (
+            <TouchableOpacity
+              key={entry.id}
+              style={[styles.listItem, { borderBottomColor: colors.borderLight }]}
+              onLongPress={() => handleDeleteVaultEntry(entry)}
+            >
+              <View>
+                <Text style={[styles.itemName, { color: colors.text }]}>
+                  {getMonthFullName(entry.month)} {entry.year}
+                </Text>
+                {entry.note && (
+                  <Text style={[styles.itemCategory, { color: colors.textTertiary }]}>{entry.note}</Text>
+                )}
+              </View>
+              <Text style={[styles.itemAmount, { color: entry.is_manual_adjustment ? colors.primary : colors.text }]}>
+                {formatCurrency(entry.balance)}
+              </Text>
+            </TouchableOpacity>
+          ))
+        )}
+      </View>
+
       {/* Sign Out */}
       <TouchableOpacity style={[styles.signOutButton, { backgroundColor: colors.error + '12' }]} onPress={handleSignOut}>
         <Text style={[styles.signOutText, { color: colors.error }]}>Cerrar sesión</Text>
@@ -771,6 +865,48 @@ export default function SettingsScreen() {
           </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Vault Adjust Modal */}
+      <Modal visible={showVaultAdjust} transparent animationType="slide">
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowVaultAdjust(false)} />
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Ajustar bóveda</Text>
+            <Text style={[styles.modalLabel, { color: colors.textSecondary }]}>
+              Saldo actual: {formatCurrency(vaultBalance)}
+            </Text>
+            <TextInput
+              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
+              value={vaultAdjustAmount}
+              onChangeText={setVaultAdjustAmount}
+              placeholder="Nuevo saldo"
+              placeholderTextColor={colors.textTertiary}
+              keyboardType="numeric"
+            />
+            <TextInput
+              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
+              value={vaultAdjustNote}
+              onChangeText={setVaultAdjustNote}
+              placeholder="Nota (opcional)"
+              placeholderTextColor={colors.textTertiary}
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButtonCancel, { backgroundColor: colors.surfaceVariant }]}
+                onPress={() => setShowVaultAdjust(false)}
+              >
+                <Text style={[styles.modalButtonTextCancel, { color: colors.textSecondary }]}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButtonConfirm, { backgroundColor: colors.primary }]} onPress={handleSaveVaultAdjust}>
+                <Text style={[styles.modalButtonTextConfirm, { color: colors.surface }]}>Guardar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
       </ScrollView>
     </View>
   );
@@ -969,6 +1105,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1a1a2e',
   },
+  itemCategory: {
+    fontSize: 12,
+    marginTop: 2,
+  },
   categorySectionTitle: {
     fontSize: 12,
     fontWeight: '600',
@@ -1091,6 +1231,24 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: 14,
     borderColor: '#fff',
+  },
+  vaultBalanceCard: {
+    padding: 16,
+    borderRadius: 12,
+    borderLeftWidth: 4,
+    marginBottom: 14,
+  },
+  vaultBalanceLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  vaultBalanceAmount: {
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
   typeRow: {
     flexDirection: 'row',
