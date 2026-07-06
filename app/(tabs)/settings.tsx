@@ -18,6 +18,7 @@ import { useFocusEffect } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useAuthContext } from '@/lib/auth-context';
 import { useAppUpdate } from '@/lib/update-context';
+import SwipeableRow from '@/components/SwipeableRow';
 import { formatCurrency, getCurrentMonth, getMonthFullName } from '@/lib/utils';
 import { Colors } from '@/lib/theme';
 import { getMonthlyBudget, setMonthlyBudget } from '@/lib/budget';
@@ -82,6 +83,10 @@ export default function SettingsScreen() {
   const [newGoalTarget, setNewGoalTarget] = useState('');
   const [newGoalIcon, setNewGoalIcon] = useState('🎯');
   const [newGoalColor, setNewGoalColor] = useState('#0891b2');
+  const [showEditSalary, setShowEditSalary] = useState(false);
+  const [editingSalary, setEditingSalary] = useState<SalaryEntry | null>(null);
+  const [editJobName, setEditJobName] = useState('');
+  const [editJobAmount, setEditJobAmount] = useState('');
   const [vaultEntries, setVaultEntries] = useState<VaultEntry[]>([]);
   const [vaultBalance, setVaultBalance] = useState(0);
   const [showVaultAdjust, setShowVaultAdjust] = useState(false);
@@ -299,6 +304,37 @@ export default function SettingsScreen() {
     ]);
   };
 
+  const handleEditSalary = (entry: SalaryEntry) => {
+    setEditingSalary(entry);
+    setEditJobName(entry.job_name);
+    setEditJobAmount(String(entry.amount));
+    setShowEditSalary(true);
+  };
+
+  const handleSaveEditSalary = async () => {
+    if (!editingSalary || !editJobName.trim() || !editJobAmount) return;
+
+    const amount = parseFloat(editJobAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Error', 'Ingresa un monto válido');
+      return;
+    }
+
+    const { error } = await (supabase as any)
+      .from('salary_entries')
+      .update({ job_name: editJobName.trim(), amount })
+      .eq('id', editingSalary.id);
+
+    if (error) {
+      Alert.alert('Error', 'No se pudo actualizar');
+      return;
+    }
+
+    setShowEditSalary(false);
+    setEditingSalary(null);
+    fetchData();
+  };
+
   const handleAddGoal = async () => {
     if (!user || !newGoalName.trim() || !newGoalTarget) {
       Alert.alert('Error', 'Completa nombre y monto objetivo');
@@ -512,17 +548,22 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
         {salaryEntries.length === 0 ? (
-          <Text style={[styles.emptyText, { color: colors.textTertiary }]}>Sin entradas este mes</Text>
+          <Text style={[styles.emptyText, { color: colors.textTertiary }]}>Sin entradas</Text>
         ) : (
           salaryEntries.map((entry) => (
-            <TouchableOpacity
+            <SwipeableRow
               key={entry.id}
-              style={[styles.listItem, { borderBottomColor: colors.borderLight }]}
-              onLongPress={() => handleDeleteSalary(entry.id)}
+              onDelete={() => handleDeleteSalary(entry.id)}
+              colors={colors}
             >
-              <Text style={[styles.itemName, { color: colors.text }]}>{entry.job_name}</Text>
-              <Text style={[styles.itemAmount, { color: colors.text }]}>{formatCurrency(entry.amount)}</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.listItem, { borderBottomColor: colors.borderLight }]}
+                onPress={() => handleEditSalary(entry)}
+              >
+                <Text style={[styles.itemName, { color: colors.text }]}>{entry.job_name}</Text>
+                <Text style={[styles.itemAmount, { color: colors.text }]}>{formatCurrency(entry.amount)}</Text>
+              </TouchableOpacity>
+            </SwipeableRow>
           ))
         )}
       </View>
@@ -792,6 +833,45 @@ export default function SettingsScreen() {
                 <Text style={[styles.modalButtonTextCancel, { color: colors.textSecondary }]}>Cancelar</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.modalButtonConfirm, { backgroundColor: colors.primary }]} onPress={handleAddSalary}>
+                <Text style={[styles.modalButtonTextConfirm, { color: colors.surface }]}>Guardar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Edit Salary Modal */}
+      <Modal visible={showEditSalary} transparent animationType="slide">
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowEditSalary(false)} />
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Editar salario</Text>
+            <TextInput
+              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
+              value={editJobName}
+              onChangeText={setEditJobName}
+              placeholder="Nombre del trabajo"
+              placeholderTextColor={colors.textTertiary}
+            />
+            <TextInput
+              style={[styles.modalInput, { color: colors.text, borderColor: colors.border, backgroundColor: colors.surfaceVariant }]}
+              value={editJobAmount}
+              onChangeText={setEditJobAmount}
+              placeholder="Monto"
+              placeholderTextColor={colors.textTertiary}
+              keyboardType="numeric"
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButtonCancel, { backgroundColor: colors.surfaceVariant }]}
+                onPress={() => setShowEditSalary(false)}
+              >
+                <Text style={[styles.modalButtonTextCancel, { color: colors.textSecondary }]}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.modalButtonConfirm, { backgroundColor: colors.primary }]} onPress={handleSaveEditSalary}>
                 <Text style={[styles.modalButtonTextConfirm, { color: colors.surface }]}>Guardar</Text>
               </TouchableOpacity>
             </View>
