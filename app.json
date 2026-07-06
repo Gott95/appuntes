@@ -22,7 +22,7 @@
     },
     "android": {
       "package": "com.gott95.appuntes",
-      "versionCode": 3,
+      "versionCode": 4,
       "adaptiveIcon": {
         "backgroundColor": "#0891b2",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
