@@ -216,7 +216,7 @@ export default function InstallmentsScreen() {
     const currentMonthStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
     
     const currentMonthPayment = plan.payments.find(
-      (p) => p.status === 'paid' && p.paid_date?.startsWith(currentMonthStr)
+      (p) => p.status === 'paid' && p.due_date.startsWith(currentMonthStr)
     );
     const nextPendingPayment = plan.payments.find(
       (p) => (p.status === 'pending' || p.status === 'overdue') && p.due_date > currentMonthStr

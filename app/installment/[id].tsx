@@ -70,9 +70,7 @@ export default function InstallmentDetailScreen() {
       return;
     }
     const dateStr = payDate.toISOString().split('T')[0];
-    console.log('Paying:', { paymentId: selectedPayment.id, amount, dateStr, payMethod });
     const success = await markPaymentAsPaid(selectedPayment.id, amount, dateStr, payMethod);
-    console.log('Payment result:', success);
     if (success) {
       setShowPayModal(false);
       setSelectedPayment(null);

@@ -362,7 +362,6 @@ export async function markPaymentAsPaid(
   paidDate: string,
   paymentMethod: string = 'cash'
 ): Promise<boolean> {
-  console.log('markPaymentAsPaid:', { paymentId, paidAmount, paidDate, paymentMethod });
   const { data, error } = await (supabase as any)
     .from('installment_payments')
     .update({
@@ -379,7 +378,6 @@ export async function markPaymentAsPaid(
     return false;
   }
 
-  console.log('markPaymentAsPaid result:', data);
   return true;
 }
 
@@ -425,10 +423,8 @@ export async function getMonthlyPaidInstallments(userId: string, month: number, 
     .from('installment_payments')
     .select('paid_amount, paid_date, due_date, installment_plans!inner(user_id)')
     .eq('status', 'paid')
-    .gte('paid_date', startDate)
-    .lte('paid_date', endDate);
-
-  console.log('getMonthlyPaidInstallments:', { month, year, startDate, endDate, dataCount: data?.length, data });
+    .gte('due_date', startDate)
+    .lte('due_date', endDate);
 
   if (!data) return 0;
 
