@@ -560,10 +560,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.08)',
     borderRadius: 3,
     marginBottom: 4,
+    overflow: 'hidden',
   },
   goalBarFill: {
     height: 6,
     borderRadius: 3,
+    maxWidth: '100%' as any,
   },
   goalAmounts: {
     fontSize: 11,
