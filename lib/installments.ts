@@ -306,6 +306,52 @@ export async function updateInstallmentPlan(
     .eq('id', planId);
 }
 
+export async function updateInstallmentPlanDetails(
+  planId: string,
+  name: string,
+  store: string,
+  startDate: string,
+): Promise<boolean> {
+  const { data: plan } = await (supabase as any)
+    .from('installment_plans')
+    .select('*')
+    .eq('id', planId)
+    .single();
+
+  if (!plan) return false;
+
+  const endDate = calculateEndDate(startDate, plan.installment_count);
+
+  const { error: planError } = await (supabase as any)
+    .from('installment_plans')
+    .update({ name, store, start_date: startDate, end_date: endDate })
+    .eq('id', planId);
+
+  if (planError) return false;
+
+  const { data: payments } = await (supabase as any)
+    .from('installment_payments')
+    .select('*')
+    .eq('plan_id', planId)
+    .order('installment_number', { ascending: true });
+
+  if (!payments) return true;
+
+  for (const payment of payments) {
+    if (payment.status === 'paid') continue;
+
+    const newDueDate = new Date(startDate);
+    newDueDate.setMonth(newDueDate.getMonth() + payment.installment_number);
+
+    await (supabase as any)
+      .from('installment_payments')
+      .update({ due_date: newDueDate.toISOString().split('T')[0] })
+      .eq('id', payment.id);
+  }
+
+  return true;
+}
+
 export async function deleteInstallmentPlan(planId: string): Promise<void> {
   await supabase.from('installment_plans').delete().eq('id', planId);
 }

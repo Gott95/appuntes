@@ -19,6 +19,7 @@ import {
   markPaymentAsPaid,
   markPaymentAsPending,
   deleteInstallmentPlan,
+  updateInstallmentPlanDetails,
   calculateTotalCost,
   generateAmortizationSchedule,
 } from '../../lib/installments';
@@ -31,11 +32,17 @@ export default function InstallmentDetailScreen() {
   const [plan, setPlan] = useState<PlanWithPayments | null>(null);
   const [showAmortization, setShowAmortization] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<InstallmentPayment | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [payDate, setPayDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [payMethod, setPayMethod] = useState('cash');
+  const [editName, setEditName] = useState('');
+  const [editStore, setEditStore] = useState('');
+  const [editStartDate, setEditStartDate] = useState(new Date());
+  const [showEditDatePicker, setShowEditDatePicker] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const loadPlan = useCallback(async () => {
     if (!id) return;
@@ -111,6 +118,35 @@ export default function InstallmentDetailScreen() {
     );
   };
 
+  const handleOpenEdit = () => {
+    if (!plan) return;
+    setEditName(plan.name);
+    setEditStore(plan.store || '');
+    setEditStartDate(new Date(plan.start_date + 'T00:00:00'));
+    setShowEditModal(true);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!plan || !editName.trim()) {
+      Alert.alert('Error', 'Ingresa el nombre');
+      return;
+    }
+    setSaving(true);
+    const ok = await updateInstallmentPlanDetails(
+      plan.id,
+      editName.trim(),
+      editStore.trim(),
+      editStartDate.toISOString().split('T')[0]
+    );
+    setSaving(false);
+    if (ok) {
+      setShowEditModal(false);
+      loadPlan();
+    } else {
+      Alert.alert('Error', 'No se pudieron guardar los cambios');
+    }
+  };
+
   if (!plan) {
     return (
       <View style={styles.container}>
@@ -145,6 +181,9 @@ export default function InstallmentDetailScreen() {
           <Text style={styles.headerTitle} numberOfLines={1}>{plan.name}</Text>
           <Text style={styles.headerStore}>{plan.store || 'Sin comercio'}</Text>
         </View>
+        <TouchableOpacity style={styles.deleteButton} onPress={handleOpenEdit}>
+          <Ionicons name="create-outline" size={20} color={Colors.light.surface} />
+        </TouchableOpacity>
         <TouchableOpacity style={styles.deleteButton} onPress={handleDeletePlan}>
           <Ionicons name="trash-outline" size={20} color={Colors.light.surface} />
         </TouchableOpacity>
@@ -436,6 +475,77 @@ export default function InstallmentDetailScreen() {
               </TouchableOpacity>
               <TouchableOpacity style={styles.payModalConfirm} onPress={confirmPayment}>
                 <Text style={styles.payModalConfirmText}>Confirmar pago</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal visible={showEditModal} transparent animationType="slide">
+        <View style={styles.payModalOverlay}>
+          <TouchableOpacity style={styles.payModalBackdrop} onPress={() => setShowEditModal(false)} />
+          <View style={styles.payModalContent}>
+            <View style={styles.payModalHandle} />
+            <Text style={styles.payModalTitle}>Editar cuota</Text>
+
+            <Text style={styles.fieldLabel}>Nombre</Text>
+            <TextInput
+              style={styles.payInput}
+              value={editName}
+              onChangeText={setEditName}
+              placeholder="Nombre del producto"
+              placeholderTextColor={Colors.light.textTertiary}
+            />
+
+            <Text style={styles.fieldLabel}>Comercio</Text>
+            <TextInput
+              style={styles.payInput}
+              value={editStore}
+              onChangeText={setEditStore}
+              placeholder="Nombre del comercio"
+              placeholderTextColor={Colors.light.textTertiary}
+            />
+
+            <Text style={styles.fieldLabel}>Fecha de inicio</Text>
+            <TouchableOpacity
+              style={styles.payInput}
+              onPress={() => setShowEditDatePicker(true)}
+            >
+              <Text style={{ color: Colors.light.text }}>
+                {editStartDate.toLocaleDateString('es-AR')}
+              </Text>
+            </TouchableOpacity>
+
+            {showEditDatePicker && (
+              <DateTimePicker
+                value={editStartDate}
+                mode="date"
+                display="default"
+                onChange={(event, date) => {
+                  setShowEditDatePicker(false);
+                  if (date) setEditStartDate(date);
+                }}
+              />
+            )}
+
+            <Text style={[styles.fieldLabel, { marginTop: 16, color: Colors.light.warning }]}>
+              Al cambiar la fecha de inicio, se recalcularán las fechas de las cuotas pendientes.
+            </Text>
+
+            <View style={styles.payModalButtons}>
+              <TouchableOpacity
+                style={styles.payModalCancel}
+                onPress={() => setShowEditModal(false)}
+              >
+                <Text style={styles.payModalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.payModalConfirm, saving && { opacity: 0.5 }]}
+                onPress={handleSaveEdit}
+                disabled={saving}
+              >
+                <Text style={styles.payModalConfirmText}>{saving ? 'Guardando...' : 'Guardar'}</Text>
               </TouchableOpacity>
             </View>
           </View>
