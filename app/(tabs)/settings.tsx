@@ -1121,6 +1121,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 8,
+    overflow: 'hidden',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -1265,6 +1266,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flex: 1,
   },
   itemIcon: {
     fontSize: 18,
