@@ -93,6 +93,7 @@ export default function SettingsScreen() {
   const [vaultEntries, setVaultEntries] = useState<VaultEntry[]>([]);
   const [vaultBalance, setVaultBalance] = useState(0);
   const [showVaultAdjust, setShowVaultAdjust] = useState(false);
+  const [vaultHidden, setVaultHidden] = useState(false);
   const [vaultAdjustAmount, setVaultAdjustAmount] = useState('');
   const [vaultAdjustNote, setVaultAdjustNote] = useState('');
 
@@ -692,8 +693,15 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
         <View style={[styles.vaultBalanceCard, { backgroundColor: colors.primary + '10', borderLeftColor: colors.primary }]}>
-          <Text style={[styles.vaultBalanceLabel, { color: colors.textSecondary }]}>Total ahorrado</Text>
-          <Text style={[styles.vaultBalanceAmount, { color: colors.text }]}>{formatCurrency(vaultBalance)}</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.vaultBalanceLabel, { color: colors.textSecondary }]}>Total ahorrado</Text>
+            <Text style={[styles.vaultBalanceAmount, { color: colors.text }]}>
+              {vaultHidden ? '••••••' : formatCurrency(vaultBalance)}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => setVaultHidden(!vaultHidden)} style={{ padding: 8 }}>
+            <Text style={{ fontSize: 18 }}>{vaultHidden ? '👁️‍🗨️' : '👁️'}</Text>
+          </TouchableOpacity>
         </View>
         {vaultEntries.length === 0 ? (
           <Text style={[styles.emptyText, { color: colors.textTertiary }]}>Sin registros. Ajusta el saldo inicial.</Text>
@@ -1410,6 +1418,8 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
   },
   vaultBalanceCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 16,
     borderRadius: 12,
     borderLeftWidth: 4,
