@@ -195,7 +195,7 @@ export default function DashboardScreen() {
             <Text style={styles.summaryIcon}>💰</Text>
             <Text style={[styles.summaryLabel, { color: colors.textTertiary }]}>Ingresos</Text>
             <Text style={[styles.summaryAmount, { color: colors.income }]}>
-              {formatCurrency(totalIncome)}
+              {formatCurrency(totalSalary)}
             </Text>
           </View>
           <View style={[styles.summaryItem, { backgroundColor: colors.surface }]}>
