@@ -367,6 +367,25 @@ export async function getMonthlyInstallmentsTotal(userId: string, month: number,
     .reduce((sum: number, item: any) => sum + item.amount, 0);
 }
 
+export async function getMonthlyPaidInstallments(userId: string, month: number, year: number): Promise<number> {
+  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+
+  const { data } = await supabase
+    .from('installment_payments')
+    .select('amount, installment_plans!inner(user_id)')
+    .eq('status', 'paid')
+    .gte('due_date', startDate)
+    .lte('due_date', endDate);
+
+  if (!data) return 0;
+
+  return data
+    .filter((item: any) => item.installment_plans?.user_id === userId)
+    .reduce((sum: number, item: any) => sum + item.amount, 0);
+}
+
 export async function getUpcomingPayments(userId: string, daysAhead: number = 30): Promise<(InstallmentPayment & { plan_name: string; plan_store: string })[]> {
   const today = new Date().toISOString().split('T')[0];
   const futureDate = new Date();

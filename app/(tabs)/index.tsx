@@ -19,7 +19,7 @@ import {
   getSavingsGoals,
   getProgressPercent,
 } from '@/lib/savings';
-import { getMonthlyInstallmentsTotal, PlanWithPayments, getAllPlansWithPayments } from '@/lib/installments';
+import { getMonthlyInstallmentsTotal, getMonthlyPaidInstallments, PlanWithPayments, getAllPlansWithPayments } from '@/lib/installments';
 
 interface FixedExpense {
   id: string;
@@ -55,6 +55,7 @@ export default function DashboardScreen() {
   } | null>(null);
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
   const [installmentsTotal, setInstallmentsTotal] = useState(0);
+  const [paidInstallments, setPaidInstallments] = useState(0);
   const [activeInstallmentPlans, setActiveInstallmentPlans] = useState<PlanWithPayments[]>([]);
   const [savingsThisMonth, setSavingsThisMonth] = useState(0);
   const router = useRouter();
@@ -66,7 +67,7 @@ export default function DashboardScreen() {
   const totalIncome = transactions
     .filter((t) => t.type === 'income')
     .reduce((sum, t) => sum + t.amount, 0);
-  const balance = totalSalary - totalFixed - totalVariable + totalIncome;
+  const balance = totalSalary - totalFixed - totalVariable + totalIncome - paidInstallments;
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -122,11 +123,13 @@ export default function DashboardScreen() {
     const goals = await getSavingsGoals(user.id);
     setSavingsGoals(goals);
 
-    const [installments, installmentPlans] = await Promise.all([
+    const [installments, installmentPlans, paidInstall] = await Promise.all([
       getMonthlyInstallmentsTotal(user.id, month, year),
       getAllPlansWithPayments(user.id),
+      getMonthlyPaidInstallments(user.id, month, year),
     ]);
     setInstallmentsTotal(installments);
+    setPaidInstallments(paidInstall);
     setActiveInstallmentPlans(installmentPlans.filter((p) => p.status === 'active').slice(0, 3));
   }, [user, month, year]);
 
