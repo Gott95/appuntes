@@ -13,16 +13,13 @@
       "translucent": true,
       "backgroundColor": "#0891b2"
     },
-    "androidNavigationBar": {
-      "visible": "immersive"
-    },
     "ios": {
       "supportsTablet": true,
       "statusBarHidden": true
     },
     "android": {
       "package": "com.gott95.appuntes",
-      "versionCode": 4,
+      "versionCode": 5,
       "adaptiveIcon": {
         "backgroundColor": "#0891b2",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -52,8 +49,7 @@
       ],
       "@react-native-community/datetimepicker",
       "expo-secure-store",
-      "react-native-edge-to-edge",
-      "expo-navigation-bar"
+      "react-native-edge-to-edge"
     ],
     "experiments": {
       "typedRoutes": true,
@@ -67,9 +63,6 @@
     "runtimeVersion": "1.0.0",
     "extra": {
       "router": {},
-      "expo-navigation-bar": {
-        "legacyVisible": "immersive"
-      },
       "eas": {
         "projectId": "9b4e0e6f-3e89-4105-be84-791e476c0e60"
       }
