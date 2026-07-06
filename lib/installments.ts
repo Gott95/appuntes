@@ -395,6 +395,73 @@ export async function markPaymentAsPending(paymentId: string): Promise<boolean> 
   return !error;
 }
 
+export async function applyExtraPayment(
+  paymentId: string,
+  paidAmount: number,
+  paidDate: string,
+  paymentMethod: string = 'cash'
+): Promise<boolean> {
+  const { data: currentPayment } = await (supabase as any)
+    .from('installment_payments')
+    .select('*')
+    .eq('id', paymentId)
+    .single();
+
+  if (!currentPayment) return false;
+
+  const { error } = await (supabase as any)
+    .from('installment_payments')
+    .update({
+      status: 'paid',
+      paid_amount: paidAmount,
+      paid_date: paidDate,
+      payment_method: paymentMethod,
+    })
+    .eq('id', paymentId);
+
+  if (error) return false;
+
+  const excess = paidAmount - currentPayment.amount;
+  if (excess <= 0) return true;
+
+  const { data: pendingPayments } = await (supabase as any)
+    .from('installment_payments')
+    .select('*')
+    .eq('plan_id', currentPayment.plan_id)
+    .eq('status', 'pending')
+    .order('installment_number', { ascending: true });
+
+  if (!pendingPayments || pendingPayments.length === 0) return true;
+
+  let remaining = excess;
+
+  for (const pending of pendingPayments) {
+    if (remaining <= 0) break;
+
+    if (remaining >= pending.amount) {
+      await (supabase as any)
+        .from('installment_payments')
+        .update({
+          status: 'paid',
+          paid_amount: pending.amount,
+          paid_date: paidDate,
+          payment_method: paymentMethod,
+        })
+        .eq('id', pending.id);
+      remaining -= pending.amount;
+    } else {
+      const newAmount = Math.round((pending.amount - remaining) * 100) / 100;
+      await (supabase as any)
+        .from('installment_payments')
+        .update({ amount: newAmount })
+        .eq('id', pending.id);
+      remaining = 0;
+    }
+  }
+
+  return true;
+}
+
 export async function getMonthlyInstallmentsTotal(userId: string, month: number, year: number): Promise<number> {
   const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const lastDay = new Date(year, month, 0).getDate();

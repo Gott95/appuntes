@@ -20,6 +20,7 @@ import {
   markPaymentAsPending,
   deleteInstallmentPlan,
   updateInstallmentPlanDetails,
+  applyExtraPayment,
   calculateTotalCost,
   generateAmortizationSchedule,
 } from '../../lib/installments';
@@ -43,6 +44,13 @@ export default function InstallmentDetailScreen() {
   const [editStartDate, setEditStartDate] = useState(new Date());
   const [showEditDatePicker, setShowEditDatePicker] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showExtraModal, setShowExtraModal] = useState(false);
+  const [extraPayment, setExtraPayment] = useState<InstallmentPayment | null>(null);
+  const [extraAmount, setExtraAmount] = useState('');
+  const [extraDate, setExtraDate] = useState(new Date());
+  const [showExtraDatePicker, setShowExtraDatePicker] = useState(false);
+  const [extraMethod, setExtraMethod] = useState('cash');
+  const [savingExtra, setSavingExtra] = useState(false);
 
   const loadPlan = useCallback(async () => {
     if (!id) return;
@@ -142,6 +150,38 @@ export default function InstallmentDetailScreen() {
       loadPlan();
     } else {
       Alert.alert('Error', 'No se pudieron guardar los cambios');
+    }
+  };
+
+  const handleExtraPayment = (payment: InstallmentPayment) => {
+    setExtraPayment(payment);
+    setExtraAmount(payment.amount.toString());
+    setExtraDate(new Date());
+    setExtraMethod('cash');
+    setShowExtraModal(true);
+  };
+
+  const confirmExtraPayment = async () => {
+    if (!extraPayment) return;
+    const amount = parseFloat(extraAmount);
+    if (isNaN(amount) || amount <= 0) {
+      Alert.alert('Error', 'Ingresa un monto válido');
+      return;
+    }
+    if (amount < extraPayment.amount) {
+      Alert.alert('Error', `El monto debe ser al menos ${extraPayment.amount.toFixed(2)}`);
+      return;
+    }
+    setSavingExtra(true);
+    const dateStr = extraDate.toISOString().split('T')[0];
+    const success = await applyExtraPayment(extraPayment.id, amount, dateStr, extraMethod);
+    setSavingExtra(false);
+    if (success) {
+      setShowExtraModal(false);
+      setExtraPayment(null);
+      loadPlan();
+    } else {
+      Alert.alert('Error', 'No se pudo registrar el pago');
     }
   };
 
@@ -338,12 +378,20 @@ export default function InstallmentDetailScreen() {
                   {formatCurrency(payment.status === 'paid' ? payment.paid_amount : payment.amount)}
                 </Text>
                 {payment.status === 'pending' && (
-                  <TouchableOpacity
-                    style={styles.payButton}
-                    onPress={() => handleMarkPaid(payment)}
-                  >
-                    <Text style={styles.payButtonText}>Pagar</Text>
-                  </TouchableOpacity>
+                  <View style={styles.paymentActions}>
+                    <TouchableOpacity
+                      style={styles.payButton}
+                      onPress={() => handleMarkPaid(payment)}
+                    >
+                      <Text style={styles.payButtonText}>Pagar</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.extraButton}
+                      onPress={() => handleExtraPayment(payment)}
+                    >
+                      <Text style={styles.extraButtonText}>Abonar +</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
                 {payment.status === 'paid' && (
                   <TouchableOpacity
@@ -544,6 +592,100 @@ export default function InstallmentDetailScreen() {
                 disabled={saving}
               >
                 <Text style={styles.payModalConfirmText}>{saving ? 'Guardando...' : 'Guardar'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Extra Payment Modal */}
+      <Modal visible={showExtraModal} transparent animationType="slide">
+        <View style={styles.payModalOverlay}>
+          <TouchableOpacity style={styles.payModalBackdrop} onPress={() => setShowExtraModal(false)} />
+          <View style={styles.payModalContent}>
+            <View style={styles.payModalHandle} />
+            <Text style={styles.payModalTitle}>
+              Abonar cuota #{extraPayment?.installment_number}
+            </Text>
+
+            <Text style={styles.fieldLabel}>Monto a abonar (mínimo {extraPayment?.amount.toFixed(2)})</Text>
+            <TextInput
+              style={styles.payInput}
+              value={extraAmount}
+              onChangeText={setExtraAmount}
+              keyboardType="numeric"
+              placeholderTextColor={Colors.light.textTertiary}
+            />
+
+            {extraAmount && parseFloat(extraAmount) > (extraPayment?.amount || 0) && (
+              <View style={[styles.card, { backgroundColor: Colors.light.success + '12', borderLeftColor: Colors.light.success, margin: 0, marginBottom: 12 }]}>
+                <Text style={[styles.cardLabel, { color: Colors.light.success }]}>
+                  Excedente: {formatCurrency(parseFloat(extraAmount) - (extraPayment?.amount || 0))}
+                </Text>
+                <Text style={[styles.cardLabel, { color: Colors.light.textSecondary, marginTop: 4 }]}>
+                  Se aplicará a las cuotas pendientes
+                </Text>
+              </View>
+            )}
+
+            <Text style={styles.fieldLabel}>Fecha de pago</Text>
+            <TouchableOpacity
+              style={styles.payInput}
+              onPress={() => setShowExtraDatePicker(true)}
+            >
+              <Text style={{ color: Colors.light.text }}>
+                {extraDate.toLocaleDateString('es-AR')}
+              </Text>
+            </TouchableOpacity>
+
+            {showExtraDatePicker && (
+              <DateTimePicker
+                value={extraDate}
+                mode="date"
+                display="default"
+                onChange={(event, date) => {
+                  setShowExtraDatePicker(false);
+                  if (date) setExtraDate(date);
+                }}
+              />
+            )}
+
+            <Text style={styles.fieldLabel}>Medio de pago</Text>
+            <View style={styles.methodGroup}>
+              {[
+                { key: 'cash', label: 'Efectivo', icon: '💵' },
+                { key: 'debit', label: 'Débito', icon: '💳' },
+                { key: 'transfer', label: 'Transferencia', icon: '🏦' },
+                { key: 'card', label: 'Crédito', icon: '💳' },
+              ].map((m) => (
+                <TouchableOpacity
+                  key={m.key}
+                  style={[styles.methodOption, extraMethod === m.key && styles.methodActive]}
+                  onPress={() => setExtraMethod(m.key)}
+                >
+                  <Text style={styles.methodIcon}>{m.icon}</Text>
+                  <Text
+                    style={[styles.methodLabel, extraMethod === m.key && styles.methodLabelActive]}
+                  >
+                    {m.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.payModalButtons}>
+              <TouchableOpacity
+                style={styles.payModalCancel}
+                onPress={() => setShowExtraModal(false)}
+              >
+                <Text style={styles.payModalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.payModalConfirm, savingExtra && { opacity: 0.5 }]}
+                onPress={confirmExtraPayment}
+                disabled={savingExtra}
+              >
+                <Text style={styles.payModalConfirmText}>{savingExtra ? 'Guardando...' : 'Confirmar abono'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -818,8 +960,34 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.semibold,
     color: Colors.light.surface,
   },
+  paymentActions: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  extraButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    backgroundColor: Colors.light.success + '15',
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    borderColor: Colors.light.success,
+  },
+  extraButtonText: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.semibold,
+    color: Colors.light.success,
+  },
   undoButton: {
     padding: 4,
+  },
+  card: {
+    padding: 12,
+    borderRadius: BorderRadius.md,
+    borderLeftWidth: 3,
+    marginBottom: 8,
+  },
+  cardLabel: {
+    fontSize: FontSize.sm,
   },
   amortizationCard: {
     backgroundColor: Colors.light.surface,
