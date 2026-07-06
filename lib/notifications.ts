@@ -1,15 +1,21 @@
-import * as Notifications from 'expo-notifications';
 import { Linking, Platform } from 'react-native';
 
+let Notifications: any = null;
+try {
+  Notifications = require('expo-notifications');
+} catch {}
+
 export async function requestNotificationPermission(): Promise<boolean> {
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  if (!Notifications) return false;
 
-  if (existingStatus === 'granted') {
-    return true;
+  try {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    if (existingStatus === 'granted') return true;
+    const { status } = await Notifications.requestPermissionsAsync();
+    return status === 'granted';
+  } catch {
+    return false;
   }
-
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === 'granted';
 }
 
 export async function openNotificationSettings(): Promise<void> {
@@ -21,14 +27,18 @@ export async function openNotificationSettings(): Promise<void> {
 }
 
 export async function sendBudgetAlert(_weekNumber: number, _spent: number, _budget: number): Promise<void> {
-  const hasPermission = await requestNotificationPermission();
-  if (!hasPermission) return;
+  if (!Notifications) return;
 
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: '⚠️ Presupuesto excedido',
-      body: `Semana ${_weekNumber}: gastaste $${_spent.toLocaleString()} de $${_budget.toLocaleString()}`,
-    },
-    trigger: null,
-  });
+  try {
+    const hasPermission = await requestNotificationPermission();
+    if (!hasPermission) return;
+
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: '⚠️ Presupuesto excedido',
+        body: `Semana ${_weekNumber}: gastaste $${_spent.toLocaleString()} de $${_budget.toLocaleString()}`,
+      },
+      trigger: null,
+    });
+  } catch {}
 }
