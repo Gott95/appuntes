@@ -43,6 +43,7 @@ export default function DashboardScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const [refreshing, setRefreshing] = useState(false);
+  const [totalSalary, setTotalSalary] = useState(0);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [monthlyBudget, setMonthlyBudget] = useState(0);
@@ -61,17 +62,18 @@ export default function DashboardScreen() {
   const totalVariable = transactions
     .filter((t) => t.type === 'expense')
     .reduce((sum, t) => sum + t.amount, 0);
-  const totalIncome = transactions
-    .filter((t) => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
-  const balance = totalIncome - totalFixed - totalVariable;
+  const balance = totalSalary - totalFixed - totalVariable;
 
   const fetchData = useCallback(async () => {
     if (!user) return;
 
     const { startDate, endDate } = getMonthRange(month, year);
 
-    const [fixedRes, transRes] = await Promise.all([
+    const [salaryRes, fixedRes, transRes] = await Promise.all([
+      supabase
+        .from('salary_entries')
+        .select('amount')
+        .eq('user_id', user.id),
       supabase
         .from('fixed_expenses')
         .select('*, categories(name, icon)')
@@ -87,6 +89,8 @@ export default function DashboardScreen() {
         .limit(10),
     ]);
 
+    const salaryTotal = (salaryRes.data || []).reduce((sum: number, e: any) => sum + e.amount, 0);
+    setTotalSalary(salaryTotal);
     setFixedExpenses(fixedRes.data || []);
     setTransactions(transRes.data || []);
 
