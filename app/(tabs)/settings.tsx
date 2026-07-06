@@ -192,7 +192,7 @@ export default function SettingsScreen() {
     } as any);
 
     if (error) {
-      Alert.alert('Error', 'No se pudo crear la categoría');
+      Alert.alert('Error', error.message || 'No se pudo guardar');
       return;
     }
 
