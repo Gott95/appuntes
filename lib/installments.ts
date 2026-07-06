@@ -374,7 +374,7 @@ export async function getMonthlyPaidInstallments(userId: string, month: number, 
 
   const { data } = await supabase
     .from('installment_payments')
-    .select('amount, installment_plans!inner(user_id)')
+    .select('paid_amount, installment_plans!inner(user_id)')
     .eq('status', 'paid')
     .gte('due_date', startDate)
     .lte('due_date', endDate);
@@ -383,7 +383,7 @@ export async function getMonthlyPaidInstallments(userId: string, month: number, 
 
   return data
     .filter((item: any) => item.installment_plans?.user_id === userId)
-    .reduce((sum: number, item: any) => sum + item.amount, 0);
+    .reduce((sum: number, item: any) => sum + (item.paid_amount || 0), 0);
 }
 
 export async function getUpcomingPayments(userId: string, daysAhead: number = 30): Promise<(InstallmentPayment & { plan_name: string; plan_store: string })[]> {

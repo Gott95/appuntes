@@ -5,6 +5,7 @@ import {
   ScrollView,
   StyleSheet,
   RefreshControl,
+  TouchableOpacity,
   useColorScheme,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -284,18 +285,25 @@ export default function DashboardScreen() {
         </View>
 
         {/* Installments Summary */}
-        {installmentsTotal > 0 || activeInstallmentPlans.length > 0 ? (
+        {(installmentsTotal > 0 || paidInstallments > 0 || activeInstallmentPlans.length > 0) && (
           <View style={[styles.section, { backgroundColor: colors.surface }]}>
             <View style={styles.sectionHeader}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Cuotas este mes</Text>
-              <Text style={[styles.sectionLink, { color: colors.primary }]}>Ver todas →</Text>
+              <TouchableOpacity onPress={() => router.push('/(tabs)/installments')}>
+                <Text style={[styles.sectionLink, { color: colors.primary }]}>Ver todas →</Text>
+              </TouchableOpacity>
             </View>
-            {installmentsTotal > 0 && (
+            {installmentsTotal > 0 ? (
               <View style={[styles.card, { backgroundColor: colors.warning + '12', borderLeftColor: colors.warning, margin: 0, marginBottom: 12 }]}>
                 <Text style={[styles.cardLabel, { color: colors.textSecondary }]}>A pagar en cuotas</Text>
                 <Text style={[styles.cardAmount, { color: colors.text }]}>{formatCurrency(installmentsTotal)}</Text>
               </View>
-            )}
+            ) : paidInstallments > 0 ? (
+              <View style={[styles.card, { backgroundColor: colors.success + '12', borderLeftColor: colors.success, margin: 0, marginBottom: 12 }]}>
+                <Text style={[styles.cardLabel, { color: colors.success }]}>✓ Cuota pagada este mes</Text>
+                <Text style={[styles.cardAmount, { color: colors.success }]}>{formatCurrency(paidInstallments)}</Text>
+              </View>
+            ) : null}
             {activeInstallmentPlans.map((plan) => (
               <View
                 key={plan.id}
@@ -314,7 +322,7 @@ export default function DashboardScreen() {
               </View>
             ))}
           </View>
-        ) : null}
+        )}
 
         {/* Savings Goals */}
         {savingsGoals.length > 0 && (

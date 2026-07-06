@@ -210,8 +210,20 @@ export default function InstallmentsScreen() {
   };
 
   const renderPlanCard = (plan: PlanWithPayments) => {
-    const daysUntilNext = plan.next_payment
-      ? Math.ceil((new Date(plan.next_payment.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+    const currentMonthStr = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+    
+    const currentMonthPayment = plan.payments.find(
+      (p) => p.due_date.startsWith(currentMonthStr) && p.status === 'paid'
+    );
+    const nextPendingPayment = plan.payments.find(
+      (p) => (p.status === 'pending' || p.status === 'overdue') && p.due_date > currentMonthStr
+    ) || plan.payments.find((p) => p.status === 'pending' || p.status === 'overdue');
+
+    const daysUntilNext = nextPendingPayment
+      ? Math.ceil((new Date(nextPendingPayment.due_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
       : null;
 
     return (
@@ -273,7 +285,12 @@ export default function InstallmentsScreen() {
             </Text>
             <Text style={styles.planStatLabel}>falta</Text>
           </View>
-          {daysUntilNext !== null && (
+          {currentMonthPayment ? (
+            <View style={styles.planStat}>
+              <Text style={[styles.planStatValue, { color: Colors.light.success }]}>✓ Pagado</Text>
+              <Text style={styles.planStatLabel}>este mes</Text>
+            </View>
+          ) : daysUntilNext !== null ? (
             <View style={styles.planStat}>
               <Text
                 style={[
@@ -287,7 +304,7 @@ export default function InstallmentsScreen() {
               </Text>
               <Text style={styles.planStatLabel}>próxima</Text>
             </View>
-          )}
+          ) : null}
         </View>
 
         {plan.interest_type === 'fixed' && (
