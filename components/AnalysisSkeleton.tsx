@@ -18,6 +18,8 @@ interface SkeletonBlockProps {
 }
 
 function SkeletonBlock({ width = '100%', height = 16, borderRadius = 8, style }: SkeletonBlockProps) {
+  const colorScheme = useColorScheme();
+  const colors = Colors[colorScheme ?? 'light'];
   const opacity = useSharedValue(0.3);
 
   useEffect(() => {
@@ -45,7 +47,7 @@ function SkeletonBlock({ width = '100%', height = 16, borderRadius = 8, style }:
           width,
           height,
           borderRadius,
-          backgroundColor: Colors.light.surfaceVariant,
+          backgroundColor: colors.surfaceVariant,
         },
         animatedStyle,
         style,

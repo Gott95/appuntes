@@ -23,6 +23,7 @@ import {
   getMonthRange,
   getLast6Months,
 } from '@/lib/utils';
+import { getMonthlyPaidInstallments } from '@/lib/installments';
 
 interface MonthData {
   month: number;
@@ -30,6 +31,8 @@ interface MonthData {
   salary: number;
   fixedExpenses: number;
   variableExpenses: number;
+  income: number;
+  paidInstallments: number;
   totalExpenses: number;
   balance: number;
 }
@@ -50,6 +53,12 @@ interface FixedDetail {
   categories: { name: string; icon: string } | null;
 }
 
+interface CategoryBreakdown {
+  name: string;
+  icon: string;
+  total: number;
+}
+
 export default function AnalysisScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -60,6 +69,7 @@ export default function AnalysisScreen() {
   const [showDetail, setShowDetail] = useState(false);
   const [detailTransactions, setDetailTransactions] = useState<TransactionDetail[]>([]);
   const [detailFixed, setDetailFixed] = useState<FixedDetail[]>([]);
+  const [detailCategories, setDetailCategories] = useState<CategoryBreakdown[]>([]);
   const [loading, setLoading] = useState(true);
   const screenWidth = Dimensions.get('window').width;
 
@@ -67,18 +77,15 @@ export default function AnalysisScreen() {
     if (!user) return;
 
     const last6 = getLast6Months();
-    const results: MonthData[] = [];
 
-    for (const { month, year } of last6) {
+    const monthPromises = last6.map(async ({ month, year }) => {
       const { startDate, endDate } = getMonthRange(month, year);
 
       const [salaryRes, fixedRes, transRes] = await Promise.all([
         supabase
           .from('salary_entries')
           .select('amount')
-          .eq('user_id', user.id)
-          .eq('month', month)
-          .eq('year', year),
+          .eq('user_id', user.id),
         supabase
           .from('fixed_expenses')
           .select('amount')
@@ -97,20 +104,27 @@ export default function AnalysisScreen() {
       const variableExpenses = (transRes.data || [])
         .filter((t: any) => t.type === 'expense')
         .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+      const income = (transRes.data || [])
+        .filter((t: any) => t.type === 'income')
+        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
+      const paidInstallments = await getMonthlyPaidInstallments(user.id, month, year);
       const totalExpenses = fixedExpenses + variableExpenses;
-      const balance = salary - totalExpenses;
+      const balance = salary - totalExpenses + income - paidInstallments;
 
-      results.push({
+      return {
         month,
         year,
         salary,
         fixedExpenses,
         variableExpenses,
+        income,
+        paidInstallments,
         totalExpenses,
         balance,
-      });
-    }
+      };
+    });
 
+    const results = await Promise.all(monthPromises);
     setMonthsData(results);
     setLoading(false);
   }, [user]);
@@ -150,8 +164,28 @@ export default function AnalysisScreen() {
         .eq('is_active', true),
     ]);
 
-    setDetailTransactions(transRes.data || []);
-    setDetailFixed(fixedRes.data || []);
+    const transactions = (transRes.data || []) as TransactionDetail[];
+    setDetailTransactions(transactions);
+    setDetailFixed((fixedRes.data || []) as FixedDetail[]);
+
+    const categoryMap = new Map<string, { name: string; icon: string; total: number }>();
+    for (const t of transactions) {
+      if (t.type !== 'expense') continue;
+      const key = t.categories?.name || 'Otros';
+      const existing = categoryMap.get(key);
+      if (existing) {
+        existing.total += t.amount;
+      } else {
+        categoryMap.set(key, {
+          name: t.categories?.name || 'Otros',
+          icon: t.categories?.icon || '📦',
+          total: t.amount,
+        });
+      }
+    }
+    const sorted = Array.from(categoryMap.values()).sort((a, b) => b.total - a.total);
+    setDetailCategories(sorted);
+
     setShowDetail(true);
   };
 
@@ -178,8 +212,6 @@ export default function AnalysisScreen() {
         savingMore: monthsData[monthsData.length - 1].balance > monthsData[monthsData.length - 2].balance,
       }
     : null;
-
-
 
   if (loading) {
     return <AnalysisSkeleton />;
@@ -330,6 +362,29 @@ export default function AnalysisScreen() {
                   </Text>
                 </View>
               </View>
+
+              {/* Category Breakdown */}
+              {detailCategories.length > 0 && (
+                <>
+                  <Text style={[styles.detailSectionTitle, { color: colors.text }]}>Top Categorías</Text>
+                  {detailCategories.slice(0, 5).map((cat, i) => {
+                    const maxTotal = detailCategories[0]?.total || 1;
+                    const barWidth = `${(cat.total / maxTotal) * 100}%`;
+                    return (
+                      <View key={i} style={[styles.categoryItem, { borderBottomColor: colors.borderLight }]}>
+                        <View style={styles.categoryHeader}>
+                          <Text style={styles.categoryIcon}>{cat.icon}</Text>
+                          <Text style={[styles.categoryName, { color: colors.text }]}>{cat.name}</Text>
+                          <Text style={[styles.categoryTotal, { color: colors.text }]}>{formatCurrency(cat.total)}</Text>
+                        </View>
+                        <View style={[styles.categoryBarBg, { backgroundColor: colors.surfaceVariant }]}>
+                          <View style={[styles.categoryBarFill, { backgroundColor: colors.primary, width: barWidth as any }]} />
+                        </View>
+                      </View>
+                    );
+                  })}
+                </>
+              )}
 
               {/* Fixed Expenses */}
               <Text style={[styles.detailSectionTitle, { color: colors.text }]}>Gastos Fijos</Text>
@@ -572,5 +627,36 @@ const styles = StyleSheet.create({
   detailItemAmount: {
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  categoryItem: {
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  categoryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  categoryIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
+  categoryName: {
+    fontSize: 13,
+    flex: 1,
+    fontWeight: '500',
+  },
+  categoryTotal: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  categoryBarBg: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  categoryBarFill: {
+    height: 6,
+    borderRadius: 3,
   },
 });
