@@ -1395,6 +1395,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     marginLeft: 12,
+    minWidth: 45,
+    textAlign: 'right',
   },
   goalIconChip: {
     fontSize: 20,
