@@ -56,20 +56,24 @@ export default function DashboardScreen() {
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
   const [installmentsTotal, setInstallmentsTotal] = useState(0);
   const [activeInstallmentPlans, setActiveInstallmentPlans] = useState<PlanWithPayments[]>([]);
+  const [savingsThisMonth, setSavingsThisMonth] = useState(0);
   const router = useRouter();
 
   const totalFixed = fixedExpenses.reduce((sum, e) => sum + e.amount, 0);
   const totalVariable = transactions
     .filter((t) => t.type === 'expense')
     .reduce((sum, t) => sum + t.amount, 0);
-  const balance = totalSalary - totalFixed - totalVariable;
+  const totalIncome = transactions
+    .filter((t) => t.type === 'income')
+    .reduce((sum, t) => sum + t.amount, 0);
+  const balance = totalSalary + totalIncome - totalFixed - totalVariable - installmentsTotal - savingsThisMonth;
 
   const fetchData = useCallback(async () => {
     if (!user) return;
 
     const { startDate, endDate } = getMonthRange(month, year);
 
-    const [salaryRes, fixedRes, transRes] = await Promise.all([
+    const [salaryRes, fixedRes, transRes, savingsRes] = await Promise.all([
       supabase
         .from('salary_entries')
         .select('amount')
@@ -87,12 +91,21 @@ export default function DashboardScreen() {
         .lte('date', endDate)
         .order('date', { ascending: false })
         .limit(10),
+      supabase
+        .from('savings_entries')
+        .select('amount')
+        .eq('user_id', user.id)
+        .gte('created_at', startDate)
+        .lte('created_at', endDate + 'T23:59:59'),
     ]);
 
     const salaryTotal = (salaryRes.data || []).reduce((sum: number, e: any) => sum + e.amount, 0);
     setTotalSalary(salaryTotal);
     setFixedExpenses(fixedRes.data || []);
     setTransactions(transRes.data || []);
+
+    const savingsTotal = (savingsRes.data || []).reduce((sum: number, e: any) => sum + e.amount, 0);
+    setSavingsThisMonth(savingsTotal);
 
     const budget = await getMonthlyBudget(user.id);
     setMonthlyBudget(budget);
@@ -195,7 +208,7 @@ export default function DashboardScreen() {
             <Text style={styles.summaryIcon}>💰</Text>
             <Text style={[styles.summaryLabel, { color: colors.textTertiary }]}>Ingresos</Text>
             <Text style={[styles.summaryAmount, { color: colors.income }]}>
-              {formatCurrency(totalSalary)}
+              {formatCurrency(totalSalary + totalIncome)}
             </Text>
           </View>
           <View style={[styles.summaryItem, { backgroundColor: colors.surface }]}>
