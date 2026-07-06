@@ -23,6 +23,7 @@ export interface InstallmentPlan {
   status: string;
   notes: string;
   is_shared: boolean;
+  partner_name: string;
   created_by: string | null;
   created_at: string;
 }
@@ -311,6 +312,7 @@ export async function updateInstallmentPlanDetails(
   name: string,
   store: string,
   startDate: string,
+  partnerName?: string,
 ): Promise<boolean> {
   const { data: plan } = await (supabase as any)
     .from('installment_plans')
@@ -322,9 +324,14 @@ export async function updateInstallmentPlanDetails(
 
   const endDate = calculateEndDate(startDate, plan.installment_count);
 
+  const updateData: any = { name, store, start_date: startDate, end_date: endDate };
+  if (partnerName !== undefined) {
+    updateData.partner_name = partnerName;
+  }
+
   const { error: planError } = await (supabase as any)
     .from('installment_plans')
-    .update({ name, store, start_date: startDate, end_date: endDate })
+    .update(updateData)
     .eq('id', planId);
 
   if (planError) return false;

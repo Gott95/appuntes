@@ -43,6 +43,7 @@ export default function InstallmentDetailScreen() {
   const [editStore, setEditStore] = useState('');
   const [editStartDate, setEditStartDate] = useState(new Date());
   const [showEditDatePicker, setShowEditDatePicker] = useState(false);
+  const [editPartnerName, setEditPartnerName] = useState('');
   const [saving, setSaving] = useState(false);
   const [showExtraModal, setShowExtraModal] = useState(false);
   const [extraPayment, setExtraPayment] = useState<InstallmentPayment | null>(null);
@@ -129,6 +130,7 @@ export default function InstallmentDetailScreen() {
     setEditName(plan.name);
     setEditStore(plan.store || '');
     setEditStartDate(new Date(plan.start_date + 'T00:00:00'));
+    setEditPartnerName(plan.partner_name || '');
     setShowEditModal(true);
   };
 
@@ -142,7 +144,8 @@ export default function InstallmentDetailScreen() {
       plan.id,
       editName.trim(),
       editStore.trim(),
-      editStartDate.toISOString().split('T')[0]
+      editStartDate.toISOString().split('T')[0],
+      plan.is_shared ? editPartnerName.trim() : undefined
     );
     setSaving(false);
     if (ok) {
@@ -217,7 +220,11 @@ export default function InstallmentDetailScreen() {
         </TouchableOpacity>
         <View style={styles.headerInfo}>
           <Text style={styles.headerTitle} numberOfLines={1}>{plan.name}</Text>
-          <Text style={styles.headerStore}>{plan.store || 'Sin comercio'}</Text>
+          {plan.is_shared && plan.partner_name ? (
+            <Text style={styles.headerStore}>👥 Compartida con {plan.partner_name}</Text>
+          ) : (
+            <Text style={styles.headerStore}>{plan.store || 'Sin comercio'}</Text>
+          )}
         </View>
         <TouchableOpacity style={styles.deleteButton} onPress={handleOpenEdit}>
           <Ionicons name="create-outline" size={20} color={Colors.light.surface} />
@@ -235,6 +242,12 @@ export default function InstallmentDetailScreen() {
             <Text style={styles.progressLabel}>pagado</Text>
           </View>
           <View style={styles.progressDetails}>
+            {plan.is_shared && plan.partner_name && (
+              <View style={styles.progressRow}>
+                <Text style={styles.progressLabel2}>Compartida con</Text>
+                <Text style={[styles.progressValue, { color: Colors.light.primary }]}>{plan.partner_name}</Text>
+              </View>
+            )}
             <View style={styles.progressRow}>
               <Text style={styles.progressLabel2}>Cuota mensual</Text>
               <Text style={styles.progressValue}>{formatCurrency(plan.installment_amount)}</Text>
@@ -573,6 +586,19 @@ export default function InstallmentDetailScreen() {
                   if (date) setEditStartDate(date);
                 }}
               />
+            )}
+
+            {plan.is_shared && (
+              <>
+                <Text style={styles.fieldLabel}>Nombre del socio</Text>
+                <TextInput
+                  style={styles.payInput}
+                  value={editPartnerName}
+                  onChangeText={setEditPartnerName}
+                  placeholder="Nombre"
+                  placeholderTextColor={Colors.light.textTertiary}
+                />
+              </>
             )}
 
             <Text style={[styles.fieldLabel, { marginTop: 16, color: Colors.light.warning }]}>

@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   TextInput,
+  Switch,
 } from 'react-native';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -48,6 +49,9 @@ export default function InstallmentsScreen() {
   const [startDate, setStartDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [autoCalculate, setAutoCalculate] = useState(true);
+  const [isShared, setIsShared] = useState(false);
+  const [partnerName, setPartnerName] = useState('');
+  const [myPortion, setMyPortion] = useState('');
 
   const loadData = useCallback(async () => {
     if (!user) return;
@@ -86,6 +90,9 @@ export default function InstallmentsScreen() {
     setInterestType('zero');
     setTna('');
     setStartDate(new Date());
+    setIsShared(false);
+    setPartnerName('');
+    setMyPortion('');
     setAutoCalculate(true);
   };
 
@@ -107,25 +114,46 @@ export default function InstallmentsScreen() {
     const total = parseFloat(totalAmount);
     const seña = parseFloat(downPayment || '0');
     const cuotas = parseInt(installmentCount);
-    const financed = total - seña;
 
-    if (financed <= 0) {
-      Alert.alert('Error', 'El monto financiado debe ser mayor a 0');
-      return;
+    if (isShared) {
+      if (!partnerName.trim()) {
+        Alert.alert('Error', 'Ingresa el nombre del socio');
+        return;
+      }
+      if (!myPortion || parseFloat(myPortion) <= 0) {
+        Alert.alert('Error', 'Ingresa tu porción de la cuota');
+        return;
+      }
     }
 
     let cuotaMonto = parseFloat(installmentAmount || '0');
+    let financed: number;
     let tem: number | null = null;
 
-    if (interestType === 'fixed' && tna) {
-      tem = calculateTEM(parseFloat(tna) / 100);
-      cuotaMonto = calculateFrenchCuota(financed, tem, cuotas);
-      setInstallmentAmount(cuotaMonto.toFixed(2));
-    } else if (autoCalculate && !installmentAmount) {
-      cuotaMonto = financed / cuotas;
-      setInstallmentAmount(cuotaMonto.toFixed(2));
-    } else if (!cuotaMonto) {
-      cuotaMonto = financed / cuotas;
+    if (isShared) {
+      const myPortionNum = parseFloat(myPortion);
+      financed = myPortionNum * cuotas;
+      cuotaMonto = myPortionNum;
+      if (financed + seña > total) {
+        Alert.alert('Error', 'Tu porción excede el precio total');
+        return;
+      }
+    } else {
+      financed = total - seña;
+      if (financed <= 0) {
+        Alert.alert('Error', 'El monto financiado debe ser mayor a 0');
+        return;
+      }
+      if (interestType === 'fixed' && tna) {
+        tem = calculateTEM(parseFloat(tna) / 100);
+        cuotaMonto = calculateFrenchCuota(financed, tem, cuotas);
+        setInstallmentAmount(cuotaMonto.toFixed(2));
+      } else if (autoCalculate && !installmentAmount) {
+        cuotaMonto = financed / cuotas;
+        setInstallmentAmount(cuotaMonto.toFixed(2));
+      } else if (!cuotaMonto) {
+        cuotaMonto = financed / cuotas;
+      }
     }
 
     const startStr = startDate.toISOString().split('T')[0];
@@ -165,12 +193,12 @@ export default function InstallmentsScreen() {
       category_id: null,
       total_amount: total,
       down_payment: seña,
-      financed_amount: financed,
+      financed_amount: Math.round(financed * 100) / 100,
       installment_count: cuotas,
       installment_amount: Math.round(cuotaMonto * 100) / 100,
       payment_frequency: 'monthly',
-      interest_type: interestType,
-      tna: interestType === 'fixed' && tna ? parseFloat(tna) : null,
+      interest_type: isShared ? 'zero' : interestType,
+      tna: !isShared && interestType === 'fixed' && tna ? parseFloat(tna) : null,
       tea: null,
       tem: tem,
       cft: null,
@@ -178,7 +206,8 @@ export default function InstallmentsScreen() {
       start_date: startStr,
       status: 'active',
       notes: '',
-      is_shared: false,
+      is_shared: isShared,
+      partner_name: isShared ? partnerName.trim() : '',
       created_by: null,
     }, payments);
 
@@ -243,7 +272,13 @@ export default function InstallmentsScreen() {
           </View>
           <View style={styles.planInfo}>
             <Text style={styles.planName} numberOfLines={1}>{plan.name}</Text>
-            <Text style={styles.planStore}>{plan.store || 'Sin comercio'}</Text>
+            {plan.is_shared && plan.partner_name ? (
+              <View style={styles.sharedBadge}>
+                <Text style={styles.sharedBadgeText}>👥 {plan.partner_name}</Text>
+              </View>
+            ) : (
+              <Text style={styles.planStore}>{plan.store || 'Sin comercio'}</Text>
+            )}
           </View>
           <View style={styles.planAmounts}>
             <Text style={styles.planCuota}>{formatCurrency(plan.installment_amount)}</Text>
@@ -526,17 +561,21 @@ export default function InstallmentsScreen() {
                 </>
               )}
 
-              {/* Installment Amount */}
-              <Text style={styles.fieldLabel}>Monto por cuota *</Text>
-              <TextInput
-                style={[styles.input, autoCalculate && styles.inputDisabled]}
-                value={installmentAmount}
-                onChangeText={setInstallmentAmount}
-                keyboardType="numeric"
-                placeholder="0"
-                placeholderTextColor={Colors.light.textTertiary}
-                editable={!autoCalculate || interestType === 'fixed'}
-              />
+              {/* Installment Amount - only show when NOT shared */}
+              {!isShared && (
+                <>
+                  <Text style={styles.fieldLabel}>Monto por cuota *</Text>
+                  <TextInput
+                    style={[styles.input, autoCalculate && styles.inputDisabled]}
+                    value={installmentAmount}
+                    onChangeText={setInstallmentAmount}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor={Colors.light.textTertiary}
+                    editable={!autoCalculate || interestType === 'fixed'}
+                  />
+                </>
+              )}
 
               {/* Start Date */}
               <Text style={styles.fieldLabel}>Fecha de primera cuota</Text>
@@ -561,10 +600,55 @@ export default function InstallmentsScreen() {
                 />
               )}
 
+              {/* Shared Toggle */}
+              <View style={styles.sharedRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Cuota compartida</Text>
+                  <Text style={{ fontSize: 12, color: Colors.light.textTertiary }}>
+                    Dividir la cuota con otra persona
+                  </Text>
+                </View>
+                <Switch
+                  value={isShared}
+                  onValueChange={setIsShared}
+                  trackColor={{ false: Colors.light.border, true: Colors.light.primary + '50' }}
+                  thumbColor={isShared ? Colors.light.primary : Colors.light.textTertiary}
+                />
+              </View>
+
+              {isShared && (
+                <>
+                  <Text style={styles.fieldLabel}>Nombre del socio *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={partnerName}
+                    onChangeText={setPartnerName}
+                    placeholder="Nombre"
+                    placeholderTextColor={Colors.light.textTertiary}
+                  />
+
+                  <Text style={styles.fieldLabel}>Tu porción mensual *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={myPortion}
+                    onChangeText={setMyPortion}
+                    keyboardType="numeric"
+                    placeholder="0"
+                    placeholderTextColor={Colors.light.textTertiary}
+                  />
+                </>
+              )}
+
               {/* Preview */}
               {totalAmount && installmentCount && (
                 <View style={styles.previewCard}>
                   <Text style={styles.previewTitle}>Resumen</Text>
+                  {isShared && partnerName && (
+                    <View style={styles.previewRow}>
+                      <Text style={styles.previewLabel}>Compartida con:</Text>
+                      <Text style={[styles.previewValue, { color: Colors.light.primary }]}>{partnerName}</Text>
+                    </View>
+                  )}
                   <View style={styles.previewRow}>
                     <Text style={styles.previewLabel}>Precio total:</Text>
                     <Text style={styles.previewValue}>{formatCurrency(parseFloat(totalAmount))}</Text>
@@ -576,17 +660,31 @@ export default function InstallmentsScreen() {
                     </View>
                   )}
                   <View style={[styles.previewRow, styles.previewTotal]}>
-                    <Text style={styles.previewTotalLabel}>Financiado:</Text>
+                    <Text style={styles.previewTotalLabel}>{isShared ? 'Mi financiamiento:' : 'Financiado:'}</Text>
                     <Text style={styles.previewTotalValue}>
                       {formatCurrency(
-                        parseFloat(totalAmount) - parseFloat(downPayment || '0')
+                        isShared
+                          ? parseFloat(myPortion || '0') * parseInt(installmentCount || '0')
+                          : parseFloat(totalAmount) - parseFloat(downPayment || '0')
                       )}
                     </Text>
                   </View>
+                  {isShared && (
+                    <View style={styles.previewRow}>
+                      <Text style={styles.previewLabel}>Socio paga:</Text>
+                      <Text style={[styles.previewValue, { color: Colors.light.textSecondary }]}>
+                        {formatCurrency(
+                          parseFloat(totalAmount) - parseFloat(downPayment || '0') - parseFloat(myPortion || '0') * parseInt(installmentCount || '0')
+                        )}
+                      </Text>
+                    </View>
+                  )}
                   <View style={styles.previewRow}>
-                    <Text style={styles.previewLabel}>Cuota mensual:</Text>
+                    <Text style={styles.previewLabel}>{isShared ? 'Mi cuota:' : 'Cuota mensual:'}</Text>
                     <Text style={[styles.previewValue, { color: Colors.light.primary, fontWeight: '700' }]}>
-                      {installmentAmount
+                      {myPortion && isShared
+                        ? formatCurrency(parseFloat(myPortion))
+                        : installmentAmount
                         ? formatCurrency(parseFloat(installmentAmount))
                         : '-'}
                     </Text>
@@ -764,6 +862,21 @@ const styles = StyleSheet.create({
     color: Colors.light.textSecondary,
     marginTop: 2,
   },
+  sharedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    backgroundColor: Colors.light.primary + '15',
+    borderRadius: BorderRadius.sm,
+    alignSelf: 'flex-start',
+  },
+  sharedBadgeText: {
+    fontSize: FontSize.xs,
+    color: Colors.light.primary,
+    fontWeight: FontWeight.medium,
+  },
   planAmounts: {
     alignItems: 'flex-end',
   },
@@ -879,6 +992,15 @@ const styles = StyleSheet.create({
   },
   inputDisabled: {
     opacity: 0.6,
+  },
+  sharedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: Colors.light.border,
   },
   radioGroup: {
     flexDirection: 'row',
