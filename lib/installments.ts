@@ -316,7 +316,8 @@ export async function markPaymentAsPaid(
   paidDate: string,
   paymentMethod: string = 'cash'
 ): Promise<boolean> {
-  const { error } = await (supabase as any)
+  console.log('markPaymentAsPaid:', { paymentId, paidAmount, paidDate, paymentMethod });
+  const { data, error } = await (supabase as any)
     .from('installment_payments')
     .update({
       status: 'paid',
@@ -324,13 +325,15 @@ export async function markPaymentAsPaid(
       paid_date: paidDate,
       payment_method: paymentMethod,
     })
-    .eq('id', paymentId);
+    .eq('id', paymentId)
+    .select();
 
   if (error) {
     console.error('Error marking payment as paid:', error.message);
     return false;
   }
 
+  console.log('markPaymentAsPaid result:', data);
   return true;
 }
 
