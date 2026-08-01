@@ -34,7 +34,23 @@ export default function LoginScreen() {
       await signIn(email.trim(), password);
       router.replace('/(auth)/preload');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Correo o contraseña incorrectos');
+      const message = error?.message || '';
+      if (
+        message.toLowerCase().includes('network request failed') ||
+        message.toLowerCase().includes('failed to fetch') ||
+        message.toLowerCase().includes('fetch') ||
+        error?.name === 'TypeError' ||
+        message.toLowerCase().includes('network')
+      ) {
+        Alert.alert(
+          'Error de conexión',
+          'No se pudo conectar con el servidor. Revisa tu conexión a internet e inténtalo de nuevo.'
+        );
+      } else if (message.toLowerCase().includes('invalid login credentials')) {
+        Alert.alert('Error', 'Correo o contraseña incorrectos');
+      } else {
+        Alert.alert('Error', message || 'No se pudo iniciar sesión');
+      }
     } finally {
       setLoading(false);
     }

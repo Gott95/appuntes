@@ -38,7 +38,21 @@ export default function SetPasswordScreen() {
       await updatePassword(password);
       router.replace('/(auth)/preload');
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'No se pudo actualizar la contraseña');
+      const message = error?.message || '';
+      if (
+        message.toLowerCase().includes('network request failed') ||
+        message.toLowerCase().includes('failed to fetch') ||
+        message.toLowerCase().includes('fetch') ||
+        error?.name === 'TypeError' ||
+        message.toLowerCase().includes('network')
+      ) {
+        Alert.alert(
+          'Error de conexión',
+          'No se pudo conectar con el servidor. Revisa tu conexión a internet e inténtalo de nuevo.'
+        );
+      } else {
+        Alert.alert('Error', message || 'No se pudo actualizar la contraseña');
+      }
     } finally {
       setLoading(false);
     }
