@@ -53,6 +53,9 @@ export default function DashboardScreen() {
     currentSpent: number;
     currentBudget: number;
     isOver: boolean;
+    monthSpent: number;
+    monthRemaining: number;
+    weeksRemaining: number;
   } | null>(null);
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
   const [installmentsTotal, setInstallmentsTotal] = useState(0);
@@ -202,6 +205,9 @@ export default function DashboardScreen() {
                 ? `Excedido por ${formatCurrency(budgetData.currentSpent - budgetData.currentBudget)}`
                 : `Disponible: ${formatCurrency(budgetData.currentBudget - budgetData.currentSpent)}`
               }
+            </Text>
+            <Text style={[styles.budgetMonthLeft, { color: budgetData.monthRemaining > 0 ? colors.textSecondary : colors.error }]}>
+              Restante del mes: {formatCurrency(budgetData.monthRemaining)} · {budgetData.weeksRemaining} semana{budgetData.weeksRemaining === 1 ? '' : 's'} restante{budgetData.weeksRemaining === 1 ? '' : 's'}
             </Text>
           </View>
         )}
@@ -444,6 +450,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginTop: 6,
+  },
+  budgetMonthLeft: {
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 4,
   },
   summaryRow: {
     flexDirection: 'row',

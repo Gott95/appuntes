@@ -33,6 +33,23 @@ export async function setMonthlyBudget(userId: string, amount: number): Promise<
     .eq('id', userId);
 }
 
+async function getMonthlySpendingThrough(userId: string, month: number, year: number, week: number): Promise<number> {
+  if (week < 1) return 0;
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const { endDate } = getWeekRange(month, year, week);
+
+  const { data } = await supabase
+    .from('transactions')
+    .select('amount')
+    .eq('user_id', userId)
+    .eq('type', 'expense')
+    .gte('date', `${year}-${pad(month)}-01`)
+    .lte('date', endDate);
+
+  return (data || []).reduce((sum: number, t: any) => sum + t.amount, 0);
+}
+
 export async function getWeeklySpending(userId: string, month: number, year: number, week: number): Promise<number> {
   const { startDate, endDate } = getWeekRange(month, year, week);
 
@@ -47,50 +64,14 @@ export async function getWeeklySpending(userId: string, month: number, year: num
   return (data || []).reduce((sum: number, t: any) => sum + t.amount, 0);
 }
 
-export async function getBudgetOverride(userId: string, month: number, year: number, week: number): Promise<number | null> {
-  const { data } = await supabase
-    .from('budget_overrides')
-    .select('adjusted_amount')
-    .eq('user_id', userId)
-    .eq('month', month)
-    .eq('year', year)
-    .eq('week_number', week)
-    .single();
-
-  return (data as any)?.adjusted_amount ?? null;
-}
-
-export async function saveBudgetOverride(
-  userId: string,
-  month: number,
-  year: number,
-  week: number,
-  originalAmount: number,
-  adjustedAmount: number
-): Promise<void> {
-  await (supabase as any).from('budget_overrides').upsert(
-    {
-      user_id: userId,
-      month,
-      year,
-      week_number: week,
-      original_amount: originalAmount,
-      adjusted_amount: adjustedAmount,
-    },
-    { onConflict: 'user_id,month,year,week_number' }
-  );
-}
-
-export async function getWeekBudget(
-  userId: string,
-  month: number,
-  year: number,
-  week: number,
-  monthlyBudget: number
-): Promise<number> {
-  const override = await getBudgetOverride(userId, month, year, week);
-  if (override !== null) return override;
-  return monthlyBudget / 4;
+export interface WeeklyBudgetResult {
+  currentWeek: number;
+  currentSpent: number;
+  currentBudget: number;
+  isOver: boolean;
+  monthSpent: number;
+  monthRemaining: number;
+  weeksRemaining: number;
 }
 
 export async function calculateAndAdjustBudgets(
@@ -98,33 +79,24 @@ export async function calculateAndAdjustBudgets(
   month: number,
   year: number,
   monthlyBudget: number
-): Promise<{ currentWeek: number; currentSpent: number; currentBudget: number; isOver: boolean }> {
+): Promise<WeeklyBudgetResult> {
   const currentWeek = getWeekOfMonth(new Date());
-  const weeklyBudget = monthlyBudget / 4;
+  const weeksRemaining = 4 - currentWeek + 1;
+
+  const monthSpent = await getMonthlySpendingThrough(userId, month, year, currentWeek);
   const currentSpent = await getWeeklySpending(userId, month, year, currentWeek);
 
-  for (let w = 1; w < currentWeek; w++) {
-    const weekSpent = await getWeeklySpending(userId, month, year, w);
-    if (weekSpent > weeklyBudget) {
-      const overspend = weekSpent - weeklyBudget;
-      const remainingWeeks = 4 - w;
-      const reductionPerWeek = overspend / remainingWeeks;
-
-      for (let rw = w + 1; rw <= 4; rw++) {
-        const existingOverride = await getBudgetOverride(userId, month, year, rw);
-        const baseBudget = existingOverride !== null ? existingOverride : weeklyBudget;
-        const newBudget = Math.max(0, baseBudget - reductionPerWeek);
-        await saveBudgetOverride(userId, month, year, rw, weeklyBudget, newBudget);
-      }
-    }
-  }
-
-  const currentBudget = await getWeekBudget(userId, month, year, currentWeek, monthlyBudget);
+  const spentBeforeWeek = Math.max(0, monthSpent - currentSpent);
+  const currentBudget = Math.max(0, (monthlyBudget - spentBeforeWeek) / weeksRemaining);
+  const monthRemaining = Math.max(0, monthlyBudget - monthSpent);
 
   return {
     currentWeek,
     currentSpent,
     currentBudget,
     isOver: currentSpent > currentBudget,
+    monthSpent,
+    monthRemaining,
+    weeksRemaining,
   };
 }

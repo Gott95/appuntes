@@ -45,3 +45,6 @@ app-example
 # Android Studio / IntelliJ
 .idea/
 *.iml
+
+# Build artifacts
+build-*.apk

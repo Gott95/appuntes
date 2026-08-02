@@ -160,38 +160,6 @@ export interface Database {
           created_at?: string;
         };
       };
-      budget_overrides: {
-        Row: {
-          id: string;
-          user_id: string;
-          month: number;
-          year: number;
-          week_number: number;
-          original_amount: number;
-          adjusted_amount: number;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          month: number;
-          year: number;
-          week_number: number;
-          original_amount: number;
-          adjusted_amount: number;
-          created_at?: string;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          month?: number;
-          year?: number;
-          week_number?: number;
-          original_amount?: number;
-          adjusted_amount?: number;
-          created_at?: string;
-        };
-      };
       savings_goals: {
         Row: {
           id: string;
