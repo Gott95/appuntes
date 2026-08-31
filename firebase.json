@@ -7,9 +7,7 @@
   },
   "auth": {
     "providers": {
-      "anonymous": false,
-      "emailPassword": true,
-      "googleSignIn": false
+      "emailPassword": true
     }
   }
 }
