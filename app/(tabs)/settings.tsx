@@ -15,7 +15,8 @@ import {
   Linking,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { collection, query, where, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { useAuthContext } from '@/lib/auth-context';
 import { useAppUpdate } from '@/lib/update-context';
 import SwipeableRow from '@/components/SwipeableRow';
@@ -57,7 +58,7 @@ interface SalaryEntry {
 
 export default function SettingsScreen() {
   const { user, profile, signOut, refreshProfile } = useAuthContext();
-  const { hasUpdate, latestBuildUrl, latestBuildNotes, currentBuild, latestBuild } = useAppUpdate();
+  const { hasUpdate, latestBuildUrl, latestBuildNotes, currentBuild, latestBuild, refresh: refreshUpdate } = useAppUpdate();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { month, year } = getCurrentMonth();
@@ -101,30 +102,20 @@ export default function SettingsScreen() {
     if (!user) return;
 
     const [fixedRes, catRes, budget, salaryRes, goals, vaultRes, balance] = await Promise.all([
-      supabase
-        .from('fixed_expenses')
-        .select('*, categories(name, icon)')
-        .eq('user_id', user.id)
-        .eq('is_active', true),
-      supabase
-        .from('categories')
-        .select('*')
-        .eq('user_id', user.id),
-      getMonthlyBudget(user.id),
-      supabase
-        .from('salary_entries')
-        .select('*')
-        .eq('user_id', user.id),
-      getSavingsGoals(user.id),
-      getVaultEntries(user.id),
-      getCurrentBalance(user.id),
+      getDocs(query(collection(db, 'users', user.uid, 'fixedExpenses'), where('is_active', '==', true))),
+      getDocs(collection(db, 'users', user.uid, 'categories')),
+      getMonthlyBudget(user.uid),
+      getDocs(collection(db, 'users', user.uid, 'salaryEntries')),
+      getSavingsGoals(user.uid),
+      getVaultEntries(user.uid),
+      getCurrentBalance(user.uid),
     ]);
 
-    setFixedExpenses(fixedRes.data || []);
-    setCategories(catRes.data || []);
+    setFixedExpenses(fixedRes.docs.map(doc => ({ id: doc.id, ...doc.data() })) as FixedExpense[]);
+    setCategories(catRes.docs.map(doc => ({ id: doc.id, ...doc.data() })));
     setMonthlyBudgetState(budget);
     setBudgetInput(budget > 0 ? String(budget) : '');
-    setSalaryEntries(salaryRes.data || []);
+    setSalaryEntries(salaryRes.docs.map(doc => ({ id: doc.id, ...doc.data() })) as SalaryEntry[]);
     setSavingsGoals(goals);
     setVaultEntries(vaultRes);
     setVaultBalance(balance);
@@ -138,7 +129,7 @@ export default function SettingsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchData();
+    await Promise.all([fetchData(), refreshUpdate()]);
     refreshProfile();
     setRefreshing(false);
   };
@@ -152,33 +143,35 @@ export default function SettingsScreen() {
       return;
     }
 
-    const { error } = await supabase.from('fixed_expenses').insert({
-      user_id: user.id,
-      name: newExpenseName.trim(),
-      amount,
-      category_id: selectedCategory,
-    } as any);
+    try {
+      await addDoc(collection(db, 'users', user.uid, 'fixedExpenses'), {
+        user_id: user.uid,
+        name: newExpenseName.trim(),
+        amount,
+        category_id: selectedCategory,
+        is_active: true,
+        created_at: new Date().toISOString(),
+      });
 
-    if (error) {
+      setNewExpenseName('');
+      setNewExpenseAmount('');
+      setSelectedCategory(null);
+      setShowAddExpense(false);
+      fetchData();
+    } catch (error) {
       Alert.alert('Error', 'No se pudo guardar');
-      return;
     }
-
-    setNewExpenseName('');
-    setNewExpenseAmount('');
-    setSelectedCategory(null);
-    setShowAddExpense(false);
-    fetchData();
   };
 
   const handleDeleteExpense = (id: string) => {
+    if (!user) return;
     Alert.alert('Eliminar', '¿Eliminar este gasto fijo?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Eliminar',
         style: 'destructive',
         onPress: async () => {
-          await supabase.from('fixed_expenses').delete().eq('id', id);
+          await deleteDoc(doc(db, 'users', user.uid, 'fixedExpenses', id));
           fetchData();
         },
       },
@@ -194,7 +187,7 @@ export default function SettingsScreen() {
   };
 
   const handleSaveEditExpense = async () => {
-    if (!editingExpense || !newExpenseName.trim() || !newExpenseAmount) return;
+    if (!editingExpense || !user || !newExpenseName.trim() || !newExpenseAmount) return;
 
     const amount = parseFloat(newExpenseAmount);
     if (isNaN(amount) || amount <= 0) {
@@ -202,55 +195,56 @@ export default function SettingsScreen() {
       return;
     }
 
-    const { error } = await (supabase as any).from('fixed_expenses').update({
-      name: newExpenseName.trim(),
-      amount,
-      category_id: selectedCategory,
-    }).eq('id', editingExpense.id);
+    try {
+      await updateDoc(doc(db, 'users', user.uid, 'fixedExpenses', editingExpense.id), {
+        name: newExpenseName.trim(),
+        amount,
+        category_id: selectedCategory,
+      });
 
-    if (error) {
+      setNewExpenseName('');
+      setNewExpenseAmount('');
+      setSelectedCategory(null);
+      setEditingExpense(null);
+      setShowEditExpense(false);
+      fetchData();
+    } catch (error) {
       Alert.alert('Error', 'No se pudo guardar');
-      return;
     }
-
-    setNewExpenseName('');
-    setNewExpenseAmount('');
-    setSelectedCategory(null);
-    setEditingExpense(null);
-    setShowEditExpense(false);
-    fetchData();
   };
 
   const handleAddCategory = async () => {
     if (!user || !newCategoryName.trim()) return;
 
-    const { error } = await supabase.from('categories').insert({
-      user_id: user.id,
-      name: newCategoryName.trim(),
-      type: newCategoryType,
-      icon: newCategoryIcon || '📦',
-    } as any);
+    try {
+      await addDoc(collection(db, 'users', user.uid, 'categories'), {
+        user_id: user.uid,
+        name: newCategoryName.trim(),
+        type: newCategoryType,
+        icon: newCategoryIcon || '📦',
+        is_default: false,
+        created_at: new Date().toISOString(),
+      });
 
-    if (error) {
-      Alert.alert('Error', error.message || 'No se pudo guardar');
-      return;
+      setNewCategoryName('');
+      setNewCategoryType('fixed');
+      setNewCategoryIcon('📦');
+      setShowAddCategory(false);
+      fetchData();
+    } catch (error) {
+      Alert.alert('Error', 'No se pudo guardar');
     }
-
-    setNewCategoryName('');
-    setNewCategoryType('fixed');
-    setNewCategoryIcon('📦');
-    setShowAddCategory(false);
-    fetchData();
   };
 
   const handleDeleteCategory = (id: string) => {
+    if (!user) return;
     Alert.alert('Eliminar', '¿Eliminar esta categoría?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Eliminar',
         style: 'destructive',
         onPress: async () => {
-          await supabase.from('categories').delete().eq('id', id);
+          await deleteDoc(doc(db, 'users', user.uid, 'categories', id));
           fetchData();
         },
       },
@@ -280,7 +274,7 @@ export default function SettingsScreen() {
       return;
     }
 
-    await setMonthlyBudget(user.id, amount);
+    await setMonthlyBudget(user.uid, amount);
     setMonthlyBudgetState(amount);
     Alert.alert('Listo', `Presupuesto mensual: ${formatCurrency(amount)}`);
   };
@@ -310,34 +304,41 @@ export default function SettingsScreen() {
       return;
     }
 
-    const { error } = await supabase.from('salary_entries').upsert(
-      {
-        user_id: user.id,
-        job_name: newJobName.trim(),
-        amount,
-      } as any,
-      { onConflict: 'user_id,job_name' }
-    );
+    try {
+      const existing = salaryEntries.find(s => s.job_name === newJobName.trim());
+      if (existing) {
+        await updateDoc(doc(db, 'users', user.uid, 'salaryEntries', existing.id), {
+          amount,
+        });
+      } else {
+        await addDoc(collection(db, 'users', user.uid, 'salaryEntries'), {
+          user_id: user.uid,
+          job_name: newJobName.trim(),
+          amount,
+          month,
+          year,
+          created_at: new Date().toISOString(),
+        });
+      }
 
-    if (error) {
+      setNewJobName('');
+      setNewJobAmount('');
+      setShowAddSalary(false);
+      fetchData();
+    } catch (error) {
       Alert.alert('Error', 'No se pudo guardar');
-      return;
     }
-
-    setNewJobName('');
-    setNewJobAmount('');
-    setShowAddSalary(false);
-    fetchData();
   };
 
   const handleDeleteSalary = (id: string) => {
+    if (!user) return;
     Alert.alert('Eliminar', '¿Eliminar esta entrada de salario?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Eliminar',
         style: 'destructive',
         onPress: async () => {
-          await supabase.from('salary_entries').delete().eq('id', id);
+          await deleteDoc(doc(db, 'users', user.uid, 'salaryEntries', id));
           fetchData();
         },
       },
@@ -352,7 +353,7 @@ export default function SettingsScreen() {
   };
 
   const handleSaveEditSalary = async () => {
-    if (!editingSalary || !editJobName.trim() || !editJobAmount) return;
+    if (!editingSalary || !user || !editJobName.trim() || !editJobAmount) return;
 
     const amount = parseFloat(editJobAmount);
     if (isNaN(amount) || amount <= 0) {
@@ -360,19 +361,18 @@ export default function SettingsScreen() {
       return;
     }
 
-    const { error } = await (supabase as any)
-      .from('salary_entries')
-      .update({ job_name: editJobName.trim(), amount })
-      .eq('id', editingSalary.id);
+    try {
+      await updateDoc(doc(db, 'users', user.uid, 'salaryEntries', editingSalary.id), {
+        job_name: editJobName.trim(),
+        amount,
+      });
 
-    if (error) {
+      setShowEditSalary(false);
+      setEditingSalary(null);
+      fetchData();
+    } catch (error) {
       Alert.alert('Error', 'No se pudo actualizar');
-      return;
     }
-
-    setShowEditSalary(false);
-    setEditingSalary(null);
-    fetchData();
   };
 
   const handleAddGoal = async () => {
@@ -388,7 +388,7 @@ export default function SettingsScreen() {
     }
 
     try {
-      const goal = await createSavingsGoal(user.id, {
+      const goal = await createSavingsGoal(user.uid, {
         name: newGoalName.trim(),
         target_amount: target,
         icon: newGoalIcon,
@@ -412,13 +412,14 @@ export default function SettingsScreen() {
   };
 
   const handleDeleteGoal = (goal: SavingsGoal) => {
+    if (!user) return;
     Alert.alert('Eliminar meta', `¿Eliminar "${goal.name}"?`, [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Eliminar',
         style: 'destructive',
         onPress: async () => {
-          await deleteSavingsGoal(goal.id);
+          await deleteSavingsGoal(goal.id, user.uid);
           fetchData();
         },
       },
@@ -434,7 +435,7 @@ export default function SettingsScreen() {
       return;
     }
 
-    await saveVaultEntry(user.id, month, year, amount, vaultAdjustNote || 'Ajuste manual', true);
+    await saveVaultEntry(user.uid, month, year, amount, vaultAdjustNote || 'Ajuste manual', true);
     setVaultAdjustAmount('');
     setVaultAdjustNote('');
     setShowVaultAdjust(false);
@@ -442,13 +443,14 @@ export default function SettingsScreen() {
   };
 
   const handleDeleteVaultEntry = (entry: VaultEntry) => {
+    if (!user) return;
     Alert.alert('Eliminar registro', `¿Eliminar el registro de ${getMonthFullName(entry.month)} ${entry.year}?`, [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Eliminar',
         style: 'destructive',
         onPress: async () => {
-          await deleteVaultEntry(entry.id);
+          await deleteVaultEntry(entry.id, user.uid);
           fetchData();
         },
       },
@@ -510,7 +512,7 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           ) : (
             <Text style={[styles.updateNoUrl, { color: colors.textTertiary }]}>
-              Pedile al develop que suba el link de descarga
+              La actualización está siendo preparada
             </Text>
           )}
         </View>
@@ -1097,10 +1099,8 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fc',
   },
   header: {
-    backgroundColor: '#0a7ea4',
     paddingBottom: 22,
     paddingHorizontal: 20,
     borderBottomLeftRadius: 24,
@@ -1109,7 +1109,6 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 28,
     fontWeight: '800',
-    color: '#fff',
     letterSpacing: -0.5,
   },
   scroll: {
@@ -1119,7 +1118,6 @@ const styles = StyleSheet.create({
     paddingBottom: 100,
   },
   card: {
-    backgroundColor: '#fff',
     marginHorizontal: 16,
     marginTop: 16,
     borderRadius: 16,
@@ -1139,7 +1137,6 @@ const styles = StyleSheet.create({
   cardTitle: {
     fontSize: 15,
     fontWeight: '700',
-    color: '#1a1a2e',
   },
   budgetSubtitle: {
     fontSize: 12,
@@ -1180,7 +1177,6 @@ const styles = StyleSheet.create({
   },
   addButton: {
     fontSize: 13,
-    color: '#0a7ea4',
     fontWeight: '700',
   },
   profileRow: {
@@ -1193,23 +1189,19 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#0a7ea4',
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#fff',
   },
   profileEmail: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
   profileStatus: {
     fontSize: 12,
-    color: '#4CAF50',
     marginTop: 2,
     fontWeight: '500',
   },
@@ -1257,7 +1249,6 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: 13,
-    color: '#bbb',
     textAlign: 'center',
     paddingVertical: 14,
   },
@@ -1267,7 +1258,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f0f0f0',
   },
   itemLeft: {
     flexDirection: 'row',
@@ -1281,12 +1271,10 @@ const styles = StyleSheet.create({
   itemName: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1a1a2e',
   },
   itemAmount: {
     fontSize: 14,
     fontWeight: '700',
-    color: '#1a1a2e',
   },
   itemCategory: {
     fontSize: 12,
@@ -1295,7 +1283,6 @@ const styles = StyleSheet.create({
   categorySectionTitle: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#aaa',
     marginBottom: 8,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -1306,7 +1293,6 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f0f0f0',
   },
   categoryIcon: {
     fontSize: 16,
@@ -1314,7 +1300,6 @@ const styles = StyleSheet.create({
   categoryName: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#1a1a2e',
   },
   signOutButton: {
     margin: 16,
@@ -1322,12 +1307,10 @@ const styles = StyleSheet.create({
     marginBottom: 40,
     padding: 16,
     borderRadius: 14,
-    backgroundColor: '#FFEBEE',
     alignItems: 'center',
   },
   signOutText: {
     fontSize: 15,
-    color: '#F44336',
     fontWeight: '700',
   },
   modalOverlay: {
@@ -1337,7 +1320,6 @@ const styles = StyleSheet.create({
     padding: 0,
   },
   modalContent: {
-    backgroundColor: '#fff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 24,
@@ -1347,21 +1329,16 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 20,
-    color: '#1a1a2e',
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: '#e8e8e8',
     borderRadius: 12,
     padding: 14,
     fontSize: 15,
     marginBottom: 12,
-    color: '#1a1a2e',
-    backgroundColor: '#fafafa',
   },
   modalLabel: {
     fontSize: 13,
-    color: '#888',
     marginBottom: 10,
     fontWeight: '600',
   },
@@ -1369,18 +1346,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   categoryChip: {
-    backgroundColor: '#f0f0f0',
     paddingHorizontal: 14,
     paddingVertical: 8,
     borderRadius: 20,
     marginRight: 8,
   },
-  categoryChipSelected: {
-    backgroundColor: '#0a7ea4',
-  },
   categoryChipText: {
     fontSize: 13,
-    color: '#333',
   },
   goalBarBg: {
     height: 6,
@@ -1423,42 +1395,28 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 12,
     borderLeftWidth: 4,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   vaultBalanceLabel: {
     fontSize: 12,
     fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
     marginBottom: 4,
   },
   vaultBalanceAmount: {
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '800',
     letterSpacing: -0.5,
   },
   typeRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 10,
     marginBottom: 16,
   },
   typeButton: {
     flex: 1,
     padding: 12,
-    borderRadius: 12,
-    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
     alignItems: 'center',
-  },
-  typeButtonActive: {
-    backgroundColor: '#0a7ea4',
-  },
-  typeText: {
-    fontSize: 13,
-    color: '#888',
-  },
-  typeTextActive: {
-    color: '#fff',
-    fontWeight: '700',
   },
   modalButtons: {
     flexDirection: 'row',
@@ -1468,25 +1426,20 @@ const styles = StyleSheet.create({
   modalButtonCancel: {
     flex: 1,
     padding: 14,
-    borderRadius: 12,
-    backgroundColor: '#f5f5f5',
+    borderRadius: 10,
     alignItems: 'center',
   },
   modalButtonConfirm: {
     flex: 1,
     padding: 14,
-    borderRadius: 12,
-    backgroundColor: '#0a7ea4',
+    borderRadius: 10,
     alignItems: 'center',
   },
   modalButtonTextCancel: {
-    fontSize: 15,
-    color: '#888',
-    fontWeight: '600',
+    fontSize: 16,
   },
   modalButtonTextConfirm: {
-    fontSize: 15,
-    color: '#fff',
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

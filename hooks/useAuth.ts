@@ -1,6 +1,14 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Session, User } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+import {
+  User,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  updatePassword,
+  signOut as firebaseSignOut,
+} from 'firebase/auth';
+import { doc, getDoc, setDoc, updateDoc, collection, writeBatch } from 'firebase/firestore';
+import { auth, db } from '@/lib/firebase';
 
 export interface UserProfile {
   id: string;
@@ -33,103 +41,98 @@ const DEFAULT_VARIABLE_CATEGORIES = [
 ];
 
 export function useAuth() {
-  const [session, setSession] = useState<Session | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   const ensureProfile = useCallback(async (userId: string, email: string) => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
 
-    if (data) {
-      setProfile(data as unknown as UserProfile);
+    if (userSnap.exists()) {
+      setProfile(userSnap.data() as UserProfile);
       return;
     }
 
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .insert({ id: userId, email, has_set_password: false } as any);
+    const newProfile: UserProfile = {
+      id: userId,
+      email,
+      has_set_password: false,
+      monthly_budget: 0,
+      created_at: new Date().toISOString(),
+    };
 
-    if (profileError) {
-      setProfile({ id: userId, email, has_set_password: false, monthly_budget: 0, created_at: new Date().toISOString() });
-      return;
+    try {
+      await setDoc(userRef, newProfile);
+
+      const batch = writeBatch(db);
+
+      DEFAULT_FIXED_CATEGORIES.forEach((cat) => {
+        const catRef = doc(collection(db, 'users', userId, 'categories'));
+        batch.set(catRef, {
+          user_id: userId,
+          name: cat.name,
+          type: 'fixed',
+          icon: cat.icon,
+          is_default: true,
+          created_at: new Date().toISOString(),
+        });
+      });
+
+      DEFAULT_VARIABLE_CATEGORIES.forEach((cat) => {
+        const catRef = doc(collection(db, 'users', userId, 'categories'));
+        batch.set(catRef, {
+          user_id: userId,
+          name: cat.name,
+          type: 'variable',
+          icon: cat.icon,
+          is_default: true,
+          created_at: new Date().toISOString(),
+        });
+      });
+
+      await batch.commit();
+    } catch (error) {
+      console.error('Error creating profile:', error);
     }
 
-    const cats = [
-      ...DEFAULT_FIXED_CATEGORIES.map((c) => ({
-        user_id: userId,
-        name: c.name,
-        type: 'fixed' as const,
-        icon: c.icon,
-        is_default: true,
-      })),
-      ...DEFAULT_VARIABLE_CATEGORIES.map((c) => ({
-        user_id: userId,
-        name: c.name,
-        type: 'variable' as const,
-        icon: c.icon,
-        is_default: true,
-      })),
-    ];
-
-    await supabase.from('categories').insert(cats as any);
-    setProfile({ id: userId, email, has_set_password: false, monthly_budget: 0, created_at: new Date().toISOString() });
+    setProfile(newProfile);
   }, []);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        ensureProfile(session.user.id, session.user.email || '');
-      }
-      setLoading(false);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session?.user) {
-        ensureProfile(session.user.id, session.user.email || '');
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      setUser(firebaseUser);
+      if (firebaseUser) {
+        await ensureProfile(firebaseUser.uid, firebaseUser.email || '');
       } else {
         setProfile(null);
       }
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => unsubscribe();
   }, [ensureProfile]);
 
   const signIn = async (email: string, password: string) => {
-    const { error, data } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    return data;
+    const result = await signInWithEmailAndPassword(auth, email, password);
+    return result;
   };
 
   const signUp = async (email: string, password: string) => {
-    const { error, data } = await supabase.auth.signUp({ email, password });
-    if (error) throw error;
-    return data;
+    const result = await createUserWithEmailAndPassword(auth, email, password);
+    return result;
   };
 
   const setPassword = async (newPassword: string) => {
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    if (error) throw error;
-
-    if (session?.user) {
-      await (supabase as any)
-        .from('profiles')
-        .update({ has_set_password: true })
-        .eq('id', session.user.id);
-    }
+    if (!user) throw new Error('No user logged in');
+    await updatePassword(user, newPassword);
+    const userRef = doc(db, 'users', user.uid);
+    await updateDoc(userRef, { has_set_password: true });
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setSession(null);
+    await firebaseSignOut(auth);
+    setUser(null);
     setProfile(null);
   };
 
@@ -140,8 +143,8 @@ export function useAuth() {
   };
 
   return {
-    session,
-    user: session?.user ?? null,
+    session: user ? { user } : null,
+    user,
     profile,
     loading,
     signIn,
@@ -150,7 +153,7 @@ export function useAuth() {
     signOut,
     getUserName,
     refreshProfile: () => {
-      if (session?.user) ensureProfile(session.user.id, session.user.email || '');
+      if (user) ensureProfile(user.uid, user.email || '');
     },
   };
 }

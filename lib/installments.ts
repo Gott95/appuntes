@@ -1,4 +1,17 @@
-import { supabase } from './supabase';
+import {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  writeBatch,
+} from 'firebase/firestore';
+import { db } from './firebase';
 
 export interface InstallmentPlan {
   id: string;
@@ -54,8 +67,6 @@ export interface PlanWithPayments extends InstallmentPlan {
   months_remaining: number;
   next_payment: InstallmentPayment | null;
 }
-
-// --- CALCULATIONS ---
 
 export function calculateTEM(tna: number): number {
   return tna / 12;
@@ -155,63 +166,49 @@ export function calculateMonthsRemaining(endDate: string): number {
   return Math.max(months, 0);
 }
 
-// --- CRUD ---
-
 export async function getInstallmentPlans(userId: string): Promise<InstallmentPlan[]> {
-  const { data } = await supabase
-    .from('installment_plans')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('status', 'active')
-    .order('created_at', { ascending: false });
-
-  return (data || []) as InstallmentPlan[];
+  const plansRef = collection(db, 'users', userId, 'installmentPlans');
+  const q = query(plansRef, where('status', '==', 'active'), orderBy('created_at', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as InstallmentPlan));
 }
 
 export async function getAllInstallmentPlans(userId: string): Promise<InstallmentPlan[]> {
-  const { data } = await supabase
-    .from('installment_plans')
-    .select('*')
-    .eq('user_id', userId)
-    .order('status', { ascending: true })
-    .order('created_at', { ascending: false });
-
-  return (data || []) as InstallmentPlan[];
+  const plansRef = collection(db, 'users', userId, 'installmentPlans');
+  const q = query(plansRef, orderBy('created_at', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as InstallmentPlan));
 }
 
-export async function getPlanWithPayments(planId: string): Promise<PlanWithPayments | null> {
-  const { data: plan } = await supabase
-    .from('installment_plans')
-    .select('*')
-    .eq('id', planId)
-    .single();
+export async function getPlanWithPayments(planId: string, userId: string): Promise<PlanWithPayments | null> {
+  const planRef = doc(db, 'users', userId, 'installmentPlans', planId);
+  const planSnap = await getDoc(planRef);
 
-  if (!plan) return null;
+  if (!planSnap.exists()) return null;
 
-  const { data: payments } = await supabase
-    .from('installment_payments')
-    .select('*')
-    .eq('plan_id', planId)
-    .order('installment_number', { ascending: true });
+  const planData = { id: planSnap.id, ...planSnap.data() } as InstallmentPlan;
 
-  const p = plan as InstallmentPlan;
-  const pays = (payments || []) as InstallmentPayment[];
+  const paymentsRef = collection(db, 'users', userId, 'installmentPlans', planId, 'payments');
+  const q = query(paymentsRef, orderBy('installment_number', 'asc'));
+  const paymentsSnap = await getDocs(q);
 
-  const totalPaid = pays
+  const payments = paymentsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as InstallmentPayment));
+
+  const totalPaid = payments
     .filter((pay) => pay.status === 'paid')
     .reduce((sum, pay) => sum + pay.paid_amount, 0);
 
-  const totalRemaining = p.financed_amount - totalPaid;
-  const percentagePaid = p.financed_amount > 0
-    ? Math.min(Math.round((totalPaid / p.financed_amount) * 100), 100)
+  const totalRemaining = planData.financed_amount - totalPaid;
+  const percentagePaid = planData.financed_amount > 0
+    ? Math.min(Math.round((totalPaid / planData.financed_amount) * 100), 100)
     : 0;
 
-  const monthsRemaining = calculateMonthsRemaining(p.end_date);
-  const nextPayment = pays.find((pay) => pay.status === 'pending' || pay.status === 'overdue') || null;
+  const monthsRemaining = calculateMonthsRemaining(planData.end_date);
+  const nextPayment = payments.find((pay) => pay.status === 'pending' || pay.status === 'overdue') || null;
 
   return {
-    ...p,
-    payments: pays,
+    ...planData,
+    payments,
     total_paid: totalPaid,
     total_remaining: Math.max(0, totalRemaining),
     percentage_paid: percentagePaid,
@@ -225,34 +222,10 @@ export async function getAllPlansWithPayments(userId: string): Promise<PlanWithP
   const plansWithPayments: PlanWithPayments[] = [];
 
   for (const plan of plans) {
-    const { data: payments } = await supabase
-      .from('installment_payments')
-      .select('*')
-      .eq('plan_id', plan.id)
-      .order('installment_number', { ascending: true });
-
-    const pays = (payments || []) as InstallmentPayment[];
-    const totalPaid = pays
-      .filter((pay) => pay.status === 'paid')
-      .reduce((sum, pay) => sum + pay.paid_amount, 0);
-
-    const totalRemaining = plan.financed_amount - totalPaid;
-    const percentagePaid = plan.financed_amount > 0
-      ? Math.min(Math.round((totalPaid / plan.financed_amount) * 100), 100)
-      : 0;
-
-    const monthsRemaining = calculateMonthsRemaining(plan.end_date);
-    const nextPayment = pays.find((pay) => pay.status === 'pending' || pay.status === 'overdue') || null;
-
-    plansWithPayments.push({
-      ...plan,
-      payments: pays,
-      total_paid: totalPaid,
-      total_remaining: Math.max(0, totalRemaining),
-      percentage_paid: percentagePaid,
-      months_remaining: monthsRemaining,
-      next_payment: nextPayment,
-    });
+    const result = await getPlanWithPayments(plan.id, userId);
+    if (result) {
+      plansWithPayments.push(result);
+    }
   }
 
   return plansWithPayments;
@@ -265,46 +238,52 @@ export async function createInstallmentPlan(
 ): Promise<InstallmentPlan | null> {
   const endDate = calculateEndDate(plan.start_date, plan.installment_count);
 
-  const { data, error } = await supabase
-    .from('installment_plans')
-    .insert({ ...plan, user_id: userId, end_date: endDate } as any)
-    .select()
-    .single();
+  try {
+    const plansRef = collection(db, 'users', userId, 'installmentPlans');
+    const docRef = await addDoc(plansRef, {
+      ...plan,
+      user_id: userId,
+      end_date: endDate,
+      created_at: new Date().toISOString(),
+    });
 
-  if (error || !data) {
-    console.error('Error creating installment plan:', error?.message);
+    if (payments.length > 0) {
+      const batch = writeBatch(db);
+
+      payments.forEach((pay) => {
+        const payRef = doc(collection(db, 'users', userId, 'installmentPlans', docRef.id, 'payments'));
+        batch.set(payRef, {
+          ...pay,
+          user_id: userId,
+          plan_id: docRef.id,
+          created_at: new Date().toISOString(),
+        });
+      });
+
+      await batch.commit();
+    }
+
+    return {
+      id: docRef.id,
+      ...plan,
+      user_id: userId,
+      end_date: endDate,
+      created_at: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('Error creating installment plan:', error);
     return null;
   }
-
-  const newPlan = data as InstallmentPlan;
-
-  if (payments.length > 0) {
-    const paymentsToInsert = payments.map((pay) => ({
-      ...pay,
-      user_id: userId,
-      plan_id: newPlan.id,
-    }));
-
-    const { error: payError } = await supabase
-      .from('installment_payments')
-      .insert(paymentsToInsert as any);
-
-    if (payError) {
-      console.error('Error creating installment payments:', payError.message);
-    }
-  }
-
-  return newPlan;
 }
 
 export async function updateInstallmentPlan(
   planId: string,
-  updates: Partial<Pick<InstallmentPlan, 'name' | 'store' | 'category_id' | 'notes' | 'status' | 'is_shared'>>
+  updates: Partial<Pick<InstallmentPlan, 'name' | 'store' | 'category_id' | 'notes' | 'status' | 'is_shared'>>,
+  userId?: string
 ): Promise<void> {
-  await (supabase as any)
-    .from('installment_plans')
-    .update(updates)
-    .eq('id', planId);
+  if (!userId) throw new Error('userId required for Firestore');
+  const planRef = doc(db, 'users', userId, 'installmentPlans', planId);
+  await updateDoc(planRef, updates);
 }
 
 export async function updateInstallmentPlanDetails(
@@ -312,161 +291,153 @@ export async function updateInstallmentPlanDetails(
   name: string,
   store: string,
   startDate: string,
+  userId?: string,
   partnerName?: string,
 ): Promise<boolean> {
-  const { data: plan } = await (supabase as any)
-    .from('installment_plans')
-    .select('*')
-    .eq('id', planId)
-    .single();
+  if (!userId) throw new Error('userId required for Firestore');
 
-  if (!plan) return false;
+  const planRef = doc(db, 'users', userId, 'installmentPlans', planId);
+  const planSnap = await getDoc(planRef);
 
-  const endDate = calculateEndDate(startDate, plan.installment_count);
+  if (!planSnap.exists()) return false;
+
+  const planData = planSnap.data();
+  const endDate = calculateEndDate(startDate, planData.installment_count);
 
   const updateData: any = { name, store, start_date: startDate, end_date: endDate };
   if (partnerName !== undefined) {
     updateData.partner_name = partnerName;
   }
 
-  const { error: planError } = await (supabase as any)
-    .from('installment_plans')
-    .update(updateData)
-    .eq('id', planId);
+  await updateDoc(planRef, updateData);
 
-  if (planError) return false;
+  const paymentsRef = collection(db, 'users', userId, 'installmentPlans', planId, 'payments');
+  const q = query(paymentsRef, orderBy('installment_number', 'asc'));
+  const paymentsSnap = await getDocs(q);
 
-  const { data: payments } = await (supabase as any)
-    .from('installment_payments')
-    .select('*')
-    .eq('plan_id', planId)
-    .order('installment_number', { ascending: true });
-
-  if (!payments) return true;
-
-  for (const payment of payments) {
-    if (payment.status === 'paid') continue;
+  for (const payDoc of paymentsSnap.docs) {
+    const payData = payDoc.data();
+    if (payData.status === 'paid') continue;
 
     const newDueDate = new Date(startDate);
-    newDueDate.setMonth(newDueDate.getMonth() + payment.installment_number);
+    newDueDate.setMonth(newDueDate.getMonth() + payData.installment_number);
 
-    await (supabase as any)
-      .from('installment_payments')
-      .update({ due_date: newDueDate.toISOString().split('T')[0] })
-      .eq('id', payment.id);
+    await updateDoc(payDoc.ref, { due_date: newDueDate.toISOString().split('T')[0] });
   }
 
   return true;
 }
 
-export async function deleteInstallmentPlan(planId: string): Promise<void> {
-  await supabase.from('installment_plans').delete().eq('id', planId);
+export async function deleteInstallmentPlan(planId: string, userId?: string): Promise<void> {
+  if (!userId) throw new Error('userId required for Firestore');
+  const planRef = doc(db, 'users', userId, 'installmentPlans', planId);
+  await deleteDoc(planRef);
 }
 
 export async function markPaymentAsPaid(
   paymentId: string,
   paidAmount: number,
   paidDate: string,
+  userId?: string,
+  planId?: string,
   paymentMethod: string = 'cash'
 ): Promise<boolean> {
-  const { data, error } = await (supabase as any)
-    .from('installment_payments')
-    .update({
+  if (!userId || !planId) throw new Error('userId and planId required for Firestore');
+
+  try {
+    const payRef = doc(db, 'users', userId, 'installmentPlans', planId, 'payments', paymentId);
+    await updateDoc(payRef, {
       status: 'paid',
       paid_amount: paidAmount,
       paid_date: paidDate,
       payment_method: paymentMethod,
-    })
-    .eq('id', paymentId)
-    .select();
-
-  if (error) {
-    console.error('Error marking payment as paid:', error.message);
+    });
+    return true;
+  } catch (error) {
+    console.error('Error marking payment as paid:', error);
     return false;
   }
-
-  return true;
 }
 
-export async function markPaymentAsPending(paymentId: string): Promise<boolean> {
-  const { error } = await (supabase as any)
-    .from('installment_payments')
-    .update({
+export async function markPaymentAsPending(paymentId: string, userId?: string, planId?: string): Promise<boolean> {
+  if (!userId || !planId) throw new Error('userId and planId required for Firestore');
+
+  try {
+    const payRef = doc(db, 'users', userId, 'installmentPlans', planId, 'payments', paymentId);
+    await updateDoc(payRef, {
       status: 'pending',
       paid_amount: 0,
       paid_date: null,
       payment_method: 'cash',
-    })
-    .eq('id', paymentId);
-
-  return !error;
+    });
+    return true;
+  } catch (error) {
+    console.error('Error marking payment as pending:', error);
+    return false;
+  }
 }
 
 export async function applyExtraPayment(
   paymentId: string,
   paidAmount: number,
   paidDate: string,
+  userId?: string,
+  planId?: string,
   paymentMethod: string = 'cash'
 ): Promise<boolean> {
-  const { data: currentPayment } = await (supabase as any)
-    .from('installment_payments')
-    .select('*')
-    .eq('id', paymentId)
-    .single();
+  if (!userId || !planId) throw new Error('userId and planId required for Firestore');
 
-  if (!currentPayment) return false;
+  try {
+    const payRef = doc(db, 'users', userId, 'installmentPlans', planId, 'payments', paymentId);
+    const paySnap = await getDoc(payRef);
 
-  const { error } = await (supabase as any)
-    .from('installment_payments')
-    .update({
+    if (!paySnap.exists()) return false;
+
+    const currentPayment = paySnap.data();
+
+    await updateDoc(payRef, {
       status: 'paid',
       paid_amount: paidAmount,
       paid_date: paidDate,
       payment_method: paymentMethod,
-    })
-    .eq('id', paymentId);
+    });
 
-  if (error) return false;
+    const excess = paidAmount - currentPayment.amount;
+    if (excess <= 0) return true;
 
-  const excess = paidAmount - currentPayment.amount;
-  if (excess <= 0) return true;
+    const paymentsRef = collection(db, 'users', userId, 'installmentPlans', planId, 'payments');
+    const q = query(paymentsRef, where('status', '==', 'pending'), orderBy('installment_number', 'asc'));
+    const pendingSnap = await getDocs(q);
 
-  const { data: pendingPayments } = await (supabase as any)
-    .from('installment_payments')
-    .select('*')
-    .eq('plan_id', currentPayment.plan_id)
-    .eq('status', 'pending')
-    .order('installment_number', { ascending: true });
+    if (pendingSnap.empty) return true;
 
-  if (!pendingPayments || pendingPayments.length === 0) return true;
+    let remaining = excess;
 
-  let remaining = excess;
+    for (const pendingDoc of pendingSnap.docs) {
+      if (remaining <= 0) break;
 
-  for (const pending of pendingPayments) {
-    if (remaining <= 0) break;
+      const pendingData = pendingDoc.data();
 
-    if (remaining >= pending.amount) {
-      await (supabase as any)
-        .from('installment_payments')
-        .update({
+      if (remaining >= pendingData.amount) {
+        await updateDoc(pendingDoc.ref, {
           status: 'paid',
-          paid_amount: pending.amount,
+          paid_amount: pendingData.amount,
           paid_date: paidDate,
           payment_method: paymentMethod,
-        })
-        .eq('id', pending.id);
-      remaining -= pending.amount;
-    } else {
-      const newAmount = Math.round((pending.amount - remaining) * 100) / 100;
-      await (supabase as any)
-        .from('installment_payments')
-        .update({ amount: newAmount })
-        .eq('id', pending.id);
-      remaining = 0;
+        });
+        remaining -= pendingData.amount;
+      } else {
+        const newAmount = Math.round((pendingData.amount - remaining) * 100) / 100;
+        await updateDoc(pendingDoc.ref, { amount: newAmount });
+        remaining = 0;
+      }
     }
-  }
 
-  return true;
+    return true;
+  } catch (error) {
+    console.error('Error applying extra payment:', error);
+    return false;
+  }
 }
 
 export async function getMonthlyInstallmentsTotal(userId: string, month: number, year: number): Promise<number> {
@@ -474,18 +445,28 @@ export async function getMonthlyInstallmentsTotal(userId: string, month: number,
   const lastDay = new Date(year, month, 0).getDate();
   const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-  const { data } = await supabase
-    .from('installment_payments')
-    .select('amount, installment_plans!inner(user_id, status)')
-    .gte('due_date', startDate)
-    .lte('due_date', endDate)
-    .neq('status', 'paid');
+  const plansRef = collection(db, 'users', userId, 'installmentPlans');
+  const plansQ = query(plansRef, where('status', '==', 'active'));
+  const plansSnap = await getDocs(plansQ);
 
-  if (!data) return 0;
+  let total = 0;
 
-  return data
-    .filter((item: any) => item.installment_plans?.user_id === userId && item.installment_plans?.status === 'active')
-    .reduce((sum: number, item: any) => sum + item.amount, 0);
+  for (const planDoc of plansSnap.docs) {
+    const paymentsRef = collection(db, 'users', userId, 'installmentPlans', planDoc.id, 'payments');
+    const q = query(
+      paymentsRef,
+      where('status', '!=', 'paid'),
+      where('due_date', '>=', startDate),
+      where('due_date', '<=', endDate)
+    );
+    const snapshot = await getDocs(q);
+
+    snapshot.docs.forEach((doc) => {
+      total += doc.data().amount || 0;
+    });
+  }
+
+  return total;
 }
 
 export async function getMonthlyPaidInstallments(userId: string, month: number, year: number): Promise<number> {
@@ -493,18 +474,27 @@ export async function getMonthlyPaidInstallments(userId: string, month: number, 
   const lastDay = new Date(year, month, 0).getDate();
   const endDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-  const { data } = await supabase
-    .from('installment_payments')
-    .select('paid_amount, paid_date, due_date, installment_plans!inner(user_id)')
-    .eq('status', 'paid')
-    .gte('due_date', startDate)
-    .lte('due_date', endDate);
+  const plansRef = collection(db, 'users', userId, 'installmentPlans');
+  const plansSnap = await getDocs(plansRef);
 
-  if (!data) return 0;
+  let total = 0;
 
-  return data
-    .filter((item: any) => item.installment_plans?.user_id === userId)
-    .reduce((sum: number, item: any) => sum + (item.paid_amount || 0), 0);
+  for (const planDoc of plansSnap.docs) {
+    const paymentsRef = collection(db, 'users', userId, 'installmentPlans', planDoc.id, 'payments');
+    const q = query(
+      paymentsRef,
+      where('status', '==', 'paid'),
+      where('due_date', '>=', startDate),
+      where('due_date', '<=', endDate)
+    );
+    const snapshot = await getDocs(q);
+
+    snapshot.docs.forEach((doc) => {
+      total += doc.data().paid_amount || 0;
+    });
+  }
+
+  return total;
 }
 
 export async function getUpcomingPayments(userId: string, daysAhead: number = 30): Promise<(InstallmentPayment & { plan_name: string; plan_store: string })[]> {
@@ -513,41 +503,63 @@ export async function getUpcomingPayments(userId: string, daysAhead: number = 30
   futureDate.setDate(futureDate.getDate() + daysAhead);
   const futureStr = futureDate.toISOString().split('T')[0];
 
-  const { data } = await supabase
-    .from('installment_payments')
-    .select('*, installment_plans!inner(user_id, name, store, status)')
-    .gte('due_date', today)
-    .lte('due_date', futureStr)
-    .eq('status', 'pending')
-    .order('due_date', { ascending: true });
+  const plansRef = collection(db, 'users', userId, 'installmentPlans');
+  const plansQ = query(plansRef, where('status', '==', 'active'));
+  const plansSnap = await getDocs(plansQ);
 
-  if (!data) return [];
+  const upcoming: (InstallmentPayment & { plan_name: string; plan_store: string })[] = [];
 
-  return data
-    .filter((item: any) => item.installment_plans?.user_id === userId && item.installment_plans?.status === 'active')
-    .map((item: any) => ({
-      ...item,
-      plan_name: item.installment_plans?.name || '',
-      plan_store: item.installment_plans?.store || '',
-    }));
+  for (const planDoc of plansSnap.docs) {
+    const planData = planDoc.data();
+    const paymentsRef = collection(db, 'users', userId, 'installmentPlans', planDoc.id, 'payments');
+    const q = query(
+      paymentsRef,
+      where('status', '==', 'pending'),
+      where('due_date', '>=', today),
+      where('due_date', '<=', futureStr)
+    );
+    const snapshot = await getDocs(q);
+
+    snapshot.docs.forEach((doc) => {
+      upcoming.push({
+        id: doc.id,
+        ...doc.data(),
+        plan_name: planData.name || '',
+        plan_store: planData.store || '',
+      } as InstallmentPayment & { plan_name: string; plan_store: string });
+    });
+  }
+
+  return upcoming.sort((a, b) => (a.due_date > b.due_date ? 1 : -1));
 }
 
 export async function getOverduePayments(userId: string): Promise<(InstallmentPayment & { plan_name: string })[]> {
   const today = new Date().toISOString().split('T')[0];
 
-  const { data } = await supabase
-    .from('installment_payments')
-    .select('*, installment_plans!inner(user_id, name, status)')
-    .lt('due_date', today)
-    .eq('status', 'pending')
-    .order('due_date', { ascending: true });
+  const plansRef = collection(db, 'users', userId, 'installmentPlans');
+  const plansQ = query(plansRef, where('status', '==', 'active'));
+  const plansSnap = await getDocs(plansQ);
 
-  if (!data) return [];
+  const overdue: (InstallmentPayment & { plan_name: string })[] = [];
 
-  return data
-    .filter((item: any) => item.installment_plans?.user_id === userId && item.installment_plans?.status === 'active')
-    .map((item: any) => ({
-      ...item,
-      plan_name: item.installment_plans?.name || '',
-    }));
+  for (const planDoc of plansSnap.docs) {
+    const planData = planDoc.data();
+    const paymentsRef = collection(db, 'users', userId, 'installmentPlans', planDoc.id, 'payments');
+    const q = query(
+      paymentsRef,
+      where('status', '==', 'pending'),
+      where('due_date', '<', today)
+    );
+    const snapshot = await getDocs(q);
+
+    snapshot.docs.forEach((doc) => {
+      overdue.push({
+        id: doc.id,
+        ...doc.data(),
+        plan_name: planData.name || '',
+      } as InstallmentPayment & { plan_name: string });
+    });
+  }
+
+  return overdue.sort((a, b) => (a.due_date > b.due_date ? 1 : -1));
 }

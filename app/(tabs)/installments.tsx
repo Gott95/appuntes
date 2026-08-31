@@ -55,7 +55,7 @@ export default function InstallmentsScreen() {
 
   const loadData = useCallback(async () => {
     if (!user) return;
-    const data = await getAllPlansWithPayments(user.id);
+    const data = await getAllPlansWithPayments(user.uid);
     setPlans(data);
   }, [user]);
 
@@ -187,7 +187,7 @@ export default function InstallmentsScreen() {
       notes: '',
     }));
 
-    const plan = await createInstallmentPlan(user.id, {
+    const plan = await createInstallmentPlan(user.uid, {
       name: name.trim(),
       store: store.trim(),
       category_id: null,

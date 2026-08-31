@@ -1,6 +1,17 @@
-import { supabase } from './supabase';
+import {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  addDoc,
+  query,
+  orderBy,
+  limit,
+  onSnapshot,
+  Unsubscribe,
+} from 'firebase/firestore';
 import { useEffect, useState, useCallback } from 'react';
-import { RealtimeChannel } from '@supabase/supabase-js';
+import { db } from './firebase';
 
 export interface ChatMessage {
   id: string;
@@ -11,15 +22,27 @@ export interface ChatMessage {
   profiles?: { email: string } | null;
 }
 
-export async function getMessages(householdId: string, limit = 50): Promise<ChatMessage[]> {
-  const { data } = await supabase
-    .from('household_messages')
-    .select('*, profiles(email)')
-    .eq('household_id', householdId)
-    .order('created_at', { ascending: false })
-    .limit(limit);
+export async function getMessages(householdId: string, limitCount = 50): Promise<ChatMessage[]> {
+  const messagesRef = collection(db, 'households', householdId, 'messages');
+  const q = query(messagesRef, orderBy('created_at', 'asc'));
+  const snapshot = await getDocs(q);
 
-  return (data || []).reverse() as ChatMessage[];
+  const messages: ChatMessage[] = [];
+  const docs = snapshot.docs.slice(-limitCount);
+
+  for (const msgDoc of docs) {
+    const msgData = msgDoc.data();
+    const userRef = doc(db, 'users', msgData.user_id);
+    const userSnap = await getDoc(userRef);
+
+    messages.push({
+      id: msgDoc.id,
+      ...msgData,
+      profiles: userSnap.exists() ? { email: userSnap.data().email } : null,
+    } as ChatMessage);
+  }
+
+  return messages;
 }
 
 export async function sendMessage(
@@ -27,19 +50,24 @@ export async function sendMessage(
   userId: string,
   content: string
 ): Promise<boolean> {
-  const { error } = await supabase.from('household_messages').insert({
-    household_id: householdId,
-    user_id: userId,
-    content,
-  } as any);
-
-  return !error;
+  try {
+    const messagesRef = collection(db, 'households', householdId, 'messages');
+    await addDoc(messagesRef, {
+      household_id: householdId,
+      user_id: userId,
+      content,
+      created_at: new Date().toISOString(),
+    });
+    return true;
+  } catch (error) {
+    console.error('Error sending message:', error);
+    return false;
+  }
 }
 
 export function useChatMessages(householdId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [channel, setChannel] = useState<RealtimeChannel | null>(null);
 
   const loadMessages = useCallback(async () => {
     if (!householdId) return;
@@ -54,34 +82,29 @@ export function useChatMessages(householdId: string | null) {
 
     loadMessages();
 
-    const chan = supabase
-      .channel(`chat:${householdId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'household_messages',
-          filter: `household_id=eq.${householdId}`,
-        },
-        async (payload) => {
-          const newMsg = payload.new as ChatMessage;
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('email')
-            .eq('id', newMsg.user_id)
-            .single();
+    const messagesRef = collection(db, 'households', householdId, 'messages');
+    const q = query(messagesRef, orderBy('created_at', 'asc'));
 
-          setMessages(prev => [...prev, { ...newMsg, profiles: profile }]);
-        }
-      )
-      .subscribe();
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const newMessages: ChatMessage[] = [];
 
-    setChannel(chan);
+      for (const msgDoc of snapshot.docs) {
+        const msgData = msgDoc.data();
+        const userRef = doc(db, 'users', msgData.user_id);
+        const userSnap = await getDoc(userRef);
 
-    return () => {
-      chan.unsubscribe();
-    };
+        newMessages.push({
+          id: msgDoc.id,
+          ...msgData,
+          profiles: userSnap.exists() ? { email: userSnap.data().email } : null,
+        } as ChatMessage);
+      }
+
+      setMessages(newMessages);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, [householdId, loadMessages]);
 
   return { messages, loading, loadMessages };
@@ -89,50 +112,58 @@ export function useChatMessages(householdId: string | null) {
 
 export function useActivityFeed(householdId: string | null) {
   const [activities, setActivities] = useState<any[]>([]);
-  const [channel, setChannel] = useState<RealtimeChannel | null>(null);
 
   useEffect(() => {
     if (!householdId) return;
 
-    (async () => {
-      const { data } = await supabase
-        .from('household_activity')
-        .select('*, profiles(email)')
-        .eq('household_id', householdId)
-        .order('created_at', { ascending: false })
-        .limit(30);
+    const loadInitial = async () => {
+      const activityRef = collection(db, 'households', householdId, 'activity');
+      const q = query(activityRef, orderBy('created_at', 'desc'));
+      const snapshot = await getDocs(q);
 
-      setActivities(data || []);
-    })();
+      const items: any[] = [];
+      const docs = snapshot.docs.slice(0, 30);
 
-    const chan = supabase
-      .channel(`activity:${householdId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'household_activity',
-          filter: `household_id=eq.${householdId}`,
-        },
-        async (payload) => {
-          const newActivity = payload.new as any;
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('email')
-            .eq('id', newActivity.user_id)
-            .single();
+      for (const actDoc of docs) {
+        const actData = actDoc.data();
+        const userRef = doc(db, 'users', actData.user_id);
+        const userSnap = await getDoc(userRef);
 
-          setActivities(prev => [{ ...newActivity, profiles: profile }, ...prev].slice(0, 30));
-        }
-      )
-      .subscribe();
+        items.push({
+          id: actDoc.id,
+          ...actData,
+          profiles: userSnap.exists() ? { email: userSnap.data().email } : null,
+        });
+      }
 
-    setChannel(chan);
-
-    return () => {
-      chan.unsubscribe();
+      setActivities(items);
     };
+
+    loadInitial();
+
+    const activityRef = collection(db, 'households', householdId, 'activity');
+    const q = query(activityRef, orderBy('created_at', 'desc'));
+
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+      const newActivities: any[] = [];
+      const docs = snapshot.docs.slice(0, 30);
+
+      for (const actDoc of docs) {
+        const actData = actDoc.data();
+        const userRef = doc(db, 'users', actData.user_id);
+        const userSnap = await getDoc(userRef);
+
+        newActivities.push({
+          id: actDoc.id,
+          ...actData,
+          profiles: userSnap.exists() ? { email: userSnap.data().email } : null,
+        });
+      }
+
+      setActivities(newActivities);
+    });
+
+    return () => unsubscribe();
   }, [householdId]);
 
   return { activities };

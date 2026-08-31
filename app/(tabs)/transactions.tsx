@@ -14,7 +14,8 @@ import {
   Platform,
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { collection, doc, query, where, getDocs, addDoc, deleteDoc, orderBy } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { useAuthContext } from '@/lib/auth-context';
 import { formatCurrency, getCurrentMonth, getMonthFullName, getMonthRange } from '@/lib/utils';
 import { Colors } from '@/lib/theme';
@@ -54,22 +55,34 @@ export default function TransactionsScreen() {
 
     const { startDate, endDate } = getMonthRange(month, year);
 
-    const [transRes, catRes] = await Promise.all([
-      supabase
-        .from('transactions')
-        .select('*, categories(name, icon)')
-        .eq('user_id', user.id)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .order('date', { ascending: false }),
-      supabase
-        .from('categories')
-        .select('*')
-        .eq('user_id', user.id),
+    const [transSnap, catSnap] = await Promise.all([
+      getDocs(query(
+        collection(db, 'users', user.uid, 'transactions'),
+        where('date', '>=', startDate),
+        where('date', '<=', endDate)
+      )),
+      getDocs(collection(db, 'users', user.uid, 'categories')),
     ]);
 
-    setTransactions(transRes.data || []);
-    setCategories(catRes.data || []);
+    const transData: Transaction[] = transSnap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        amount: data.amount,
+        description: data.description,
+        type: data.type,
+        date: data.date,
+        category_id: data.category_id,
+        categories: data.categories || null,
+      };
+    });
+    setTransactions(transData);
+
+    const catData = catSnap.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+    setCategories(catData);
   }, [user, month, year]);
 
   useFocusEffect(
@@ -105,38 +118,41 @@ export default function TransactionsScreen() {
       return;
     }
 
-    const { error } = await supabase.from('transactions').insert({
-      user_id: user.id,
-      description: description.trim(),
-      amount: parsedAmount,
-      type,
-      category_id: selectedCategory,
-      date: selectedDate,
-      is_shared: isShared,
-      created_by: user.id,
-    } as any);
+    try {
+      const transRef = collection(db, 'users', user.uid, 'transactions');
+      await addDoc(transRef, {
+        user_id: user.uid,
+        description: description.trim(),
+        amount: parsedAmount,
+        type,
+        category_id: selectedCategory,
+        date: selectedDate,
+        is_shared: isShared,
+        created_by: user.uid,
+        created_at: new Date().toISOString(),
+      });
 
-    if (error) {
+      setDescription('');
+      setAmount('');
+      setSelectedCategory(null);
+      setIsShared(false);
+      setShowAddModal(false);
+      fetchData();
+    } catch (error) {
       Alert.alert('Error', 'No se pudo guardar la transacción');
-      return;
     }
-
-    setDescription('');
-    setAmount('');
-    setSelectedCategory(null);
-    setIsShared(false);
-    setShowAddModal(false);
-    fetchData();
   };
 
   const handleDelete = (id: string) => {
+    if (!user) return;
     Alert.alert('Eliminar', '¿Eliminar esta transacción?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Eliminar',
         style: 'destructive',
         onPress: async () => {
-          await supabase.from('transactions').delete().eq('id', id);
+          const transRef = doc(db, 'users', user.uid, 'transactions', id);
+          await deleteDoc(transRef);
           fetchData();
         },
       },

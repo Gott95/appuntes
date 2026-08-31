@@ -24,13 +24,13 @@ export function useHousehold() {
     if (!user) return;
     setLoading(true);
 
-    const hh = await getUserHousehold(user.id);
+    const hh = await getUserHousehold(user.uid);
     setHousehold(hh);
 
     if (hh) {
       const mems = await getHouseholdMembers(hh.id);
       setMembers(mems);
-      setIsAdmin(mems.some(m => m.user_id === user.id && m.role === 'admin'));
+      setIsAdmin(mems.some(m => m.user_id === user.uid && m.role === 'admin'));
     } else {
       setMembers([]);
       setIsAdmin(false);
@@ -45,7 +45,7 @@ export function useHousehold() {
 
   const handleCreateHousehold = async (name: string) => {
     if (!user) return null;
-    const hh = await createHousehold(user.id, name);
+    const hh = await createHousehold(user.uid, name);
     if (hh) {
       setHousehold(hh);
       const mems = await getHouseholdMembers(hh.id);
@@ -57,7 +57,7 @@ export function useHousehold() {
 
   const handleJoinHousehold = async (code: string) => {
     if (!user) return null;
-    const hh = await joinHousehold(user.id, code);
+    const hh = await joinHousehold(user.uid, code);
     if (hh) {
       setHousehold(hh);
       const mems = await getHouseholdMembers(hh.id);
@@ -81,7 +81,7 @@ export function useHousehold() {
 
   const handleLeaveHousehold = async () => {
     if (!household || !user) return;
-    await removeMember(household.id, user.id);
+    await removeMember(household.id, user.uid);
     setHousehold(null);
     setMembers([]);
     setIsAdmin(false);

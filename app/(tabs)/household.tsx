@@ -20,7 +20,7 @@ import { useHousehold } from '@/hooks/useHousehold';
 import { HouseholdMember, logActivity, getSharedTransactions, getSharedExpenses, getSharedSavingsGoals } from '@/lib/household';
 import { useChatMessages, sendMessage, useActivityFeed } from '@/lib/household-chat';
 import { getProgressPercent } from '@/lib/savings';
-import { supabase } from '@/lib/supabase';
+
 
 type ViewMode = 'setup' | 'dashboard' | 'members' | 'settings' | 'chat';
 
@@ -114,10 +114,10 @@ export default function HouseholdScreen() {
 
   const handleSendMessage = async () => {
     if (!user || !household || !chatInput.trim()) return;
-    const ok = await sendMessage(household.id, user.id, chatInput.trim());
+    const ok = await sendMessage(household.id, user.uid, chatInput.trim());
     if (ok) {
       setChatInput('');
-      logActivity(household.id, user.id, 'chat_message', { preview: chatInput.trim().slice(0, 50) });
+      logActivity(household.id, user.uid, 'chat_message', { preview: chatInput.trim().slice(0, 50) });
     }
   };
 
@@ -284,7 +284,7 @@ export default function HouseholdScreen() {
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.chatList}
             renderItem={({ item }) => {
-              const isMe = item.user_id === user?.id;
+              const isMe = item.user_id === user?.uid;
               return (
                 <View style={[styles.chatBubble, isMe ? styles.chatBubbleMe : styles.chatBubbleOther, { backgroundColor: isMe ? colors.primary : colors.surface }]}>
                   {!isMe && <Text style={[styles.chatSender, { color: colors.primary }]}>{email(item)}</Text>}
@@ -328,7 +328,7 @@ export default function HouseholdScreen() {
                   {member.role === 'admin' ? 'Admin' : 'Miembro'}
                 </Text>
               </View>
-              {isAdmin && member.user_id !== user?.id && (
+              {isAdmin && member.user_id !== user?.uid && (
                 <TouchableOpacity onPress={() => handleRemoveMember(member)}>
                   <Text style={{ color: colors.error, fontSize: 13 }}>Expulsar</Text>
                 </TouchableOpacity>

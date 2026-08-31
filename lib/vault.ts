@@ -1,4 +1,17 @@
-import { supabase } from './supabase';
+import {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  limit,
+} from 'firebase/firestore';
+import { db } from './firebase';
 
 export interface VaultEntry {
   id: string;
@@ -13,40 +26,34 @@ export interface VaultEntry {
 }
 
 export async function getVaultEntries(userId: string): Promise<VaultEntry[]> {
-  const { data } = await supabase
-    .from('vault_entries')
-    .select('*')
-    .eq('user_id', userId)
-    .order('year', { ascending: false })
-    .order('month', { ascending: false });
-
-  return (data || []) as VaultEntry[];
+  const entriesRef = collection(db, 'users', userId, 'vaultEntries');
+  const q = query(entriesRef, orderBy('year', 'desc'), orderBy('month', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as VaultEntry));
 }
 
 export async function getVaultEntry(userId: string, month: number, year: number): Promise<VaultEntry | null> {
-  const { data } = await supabase
-    .from('vault_entries')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('month', month)
-    .eq('year', year)
-    .single();
+  const entriesRef = collection(db, 'users', userId, 'vaultEntries');
+  const q = query(
+    entriesRef,
+    where('month', '==', month),
+    where('year', '==', year),
+    limit(1)
+  );
+  const snapshot = await getDocs(q);
 
-  if (!data) return null;
-  return data as unknown as VaultEntry;
+  if (snapshot.empty) return null;
+  const doc = snapshot.docs[0];
+  return { id: doc.id, ...doc.data() } as VaultEntry;
 }
 
 export async function getCurrentBalance(userId: string): Promise<number> {
-  const { data } = await supabase
-    .from('vault_entries')
-    .select('balance')
-    .eq('user_id', userId)
-    .order('year', { ascending: false })
-    .order('month', { ascending: false })
-    .limit(1)
-    .single();
+  const entriesRef = collection(db, 'users', userId, 'vaultEntries');
+  const q = query(entriesRef, orderBy('year', 'desc'), orderBy('month', 'desc'), limit(1));
+  const snapshot = await getDocs(q);
 
-  return (data as any)?.balance || 0;
+  if (snapshot.empty) return 0;
+  return snapshot.docs[0].data()?.balance || 0;
 }
 
 export async function saveVaultEntry(
@@ -57,22 +64,35 @@ export async function saveVaultEntry(
   note?: string,
   isManual: boolean = false
 ): Promise<void> {
-  await (supabase as any).from('vault_entries').upsert(
-    {
+  const existing = await getVaultEntry(userId, month, year);
+
+  if (existing) {
+    const entryRef = doc(db, 'users', userId, 'vaultEntries', existing.id);
+    await updateDoc(entryRef, {
+      balance,
+      note: note || null,
+      is_manual_adjustment: isManual,
+      updated_at: new Date().toISOString(),
+    });
+  } else {
+    const entriesRef = collection(db, 'users', userId, 'vaultEntries');
+    await addDoc(entriesRef, {
       user_id: userId,
       month,
       year,
       balance,
       note: note || null,
       is_manual_adjustment: isManual,
+      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'user_id,month,year' }
-  );
+    });
+  }
 }
 
-export async function deleteVaultEntry(id: string): Promise<void> {
-  await supabase.from('vault_entries').delete().eq('id', id);
+export async function deleteVaultEntry(id: string, userId?: string): Promise<void> {
+  if (!userId) throw new Error('userId required for Firestore');
+  const entryRef = doc(db, 'users', userId, 'vaultEntries', id);
+  await deleteDoc(entryRef);
 }
 
 export async function getTotalSaved(userId: string): Promise<number> {

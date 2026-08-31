@@ -9,7 +9,8 @@ import {
   useColorScheme,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { useAuthContext } from '@/lib/auth-context';
 import { formatCurrency, getCurrentMonth, getMonthFullName, getMonthRange } from '@/lib/utils';
 import { Colors } from '@/lib/theme';
@@ -79,44 +80,55 @@ export default function DashboardScreen() {
     const { startDate, endDate } = getMonthRange(month, year);
 
     const [salaryRes, fixedRes, transRes, savingsRes] = await Promise.all([
-      supabase
-        .from('salary_entries')
-        .select('amount')
-        .eq('user_id', user.id),
-      supabase
-        .from('fixed_expenses')
-        .select('*, categories(name, icon)')
-        .eq('user_id', user.id)
-        .eq('is_active', true),
-      supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', user.id)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .order('date', { ascending: false })
-        .limit(10),
-      supabase
-        .from('savings_entries')
-        .select('amount')
-        .eq('user_id', user.id)
-        .gte('created_at', startDate)
-        .lte('created_at', endDate + 'T23:59:59'),
+      getDocs(collection(db, 'users', user.uid, 'salaryEntries')),
+      getDocs(query(collection(db, 'users', user.uid, 'fixedExpenses'), where('is_active', '==', true))),
+      getDocs(query(
+        collection(db, 'users', user.uid, 'transactions'),
+        where('date', '>=', startDate),
+        where('date', '<=', endDate)
+      )),
+      getDocs(query(
+        collection(db, 'users', user.uid, 'savingsEntries'),
+        where('created_at', '>=', startDate),
+        where('created_at', '<=', endDate + 'T23:59:59')
+      )),
     ]);
 
-    const salaryTotal = (salaryRes.data || []).reduce((sum: number, e: any) => sum + e.amount, 0);
+    const salaryTotal = salaryRes.docs.reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
     setTotalSalary(salaryTotal);
-    setFixedExpenses(fixedRes.data || []);
-    setTransactions(transRes.data || []);
 
-    const savingsTotal = (savingsRes.data || []).reduce((sum: number, e: any) => sum + e.amount, 0);
+    const fixedData: FixedExpense[] = fixedRes.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: data.name,
+        amount: data.amount,
+        category_id: data.category_id,
+        categories: data.categories || null,
+      };
+    });
+    setFixedExpenses(fixedData);
+
+    const transData: Transaction[] = transRes.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        amount: data.amount,
+        description: data.description,
+        type: data.type,
+        date: data.date,
+      };
+    });
+    setTransactions(transData);
+
+    const savingsTotal = savingsRes.docs.reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
     setSavingsThisMonth(savingsTotal);
 
-    const budget = await getMonthlyBudget(user.id);
+    const budget = await getMonthlyBudget(user.uid);
     setMonthlyBudget(budget);
 
     if (budget > 0) {
-      const bd = await calculateAndAdjustBudgets(user.id, month, year, budget);
+      const bd = await calculateAndAdjustBudgets(user.uid, month, year, budget);
       setBudgetData(bd);
 
       if (bd.isOver) {
@@ -124,13 +136,13 @@ export default function DashboardScreen() {
       }
     }
 
-    const goals = await getSavingsGoals(user.id);
+    const goals = await getSavingsGoals(user.uid);
     setSavingsGoals(goals);
 
     const [installments, installmentPlans, paidInstall] = await Promise.all([
-      getMonthlyInstallmentsTotal(user.id, month, year),
-      getAllPlansWithPayments(user.id),
-      getMonthlyPaidInstallments(user.id, month, year),
+      getMonthlyInstallmentsTotal(user.uid, month, year),
+      getAllPlansWithPayments(user.uid),
+      getMonthlyPaidInstallments(user.uid, month, year),
     ]);
     setInstallmentsTotal(installments);
     setPaidInstallments(paidInstall);

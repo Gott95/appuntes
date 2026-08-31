@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { BarChart } from 'react-native-chart-kit';
-import { supabase } from '@/lib/supabase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { useAuthContext } from '@/lib/auth-context';
 import { Colors } from '@/lib/theme';
 import { AnalysisSkeleton } from '@/components/AnalysisSkeleton';
@@ -82,32 +83,27 @@ export default function AnalysisScreen() {
       const { startDate, endDate } = getMonthRange(month, year);
 
       const [salaryRes, fixedRes, transRes] = await Promise.all([
-        supabase
-          .from('salary_entries')
-          .select('amount')
-          .eq('user_id', user.id),
-        supabase
-          .from('fixed_expenses')
-          .select('amount')
-          .eq('user_id', user.id)
-          .eq('is_active', true),
-        supabase
-          .from('transactions')
-          .select('amount, type')
-          .eq('user_id', user.id)
-          .gte('date', startDate)
-          .lte('date', endDate),
+        getDocs(collection(db, 'users', user.uid, 'salaryEntries')),
+        getDocs(query(collection(db, 'users', user.uid, 'fixedExpenses'), where('is_active', '==', true))),
+        getDocs(query(
+          collection(db, 'users', user.uid, 'transactions'),
+          where('date', '>=', startDate),
+          where('date', '<=', endDate)
+        )),
       ]);
 
-      const salary = (salaryRes.data || []).reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
-      const fixedExpenses = (fixedRes.data || []).reduce((sum: number, e: any) => sum + (e.amount || 0), 0);
-      const variableExpenses = (transRes.data || [])
-        .filter((t: any) => t.type === 'expense')
-        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
-      const income = (transRes.data || [])
-        .filter((t: any) => t.type === 'income')
-        .reduce((sum: number, t: any) => sum + (t.amount || 0), 0);
-      const paidInstallments = await getMonthlyPaidInstallments(user.id, month, year);
+      const salary = salaryRes.docs.reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
+      const fixedExpenses = fixedRes.docs.reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
+
+      const variableExpenses = transRes.docs
+        .filter((doc) => doc.data().type === 'expense')
+        .reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
+
+      const income = transRes.docs
+        .filter((doc) => doc.data().type === 'income')
+        .reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
+
+      const paidInstallments = await getMonthlyPaidInstallments(user.uid, month, year);
       const totalExpenses = fixedExpenses + variableExpenses;
       const balance = salary - totalExpenses + income - paidInstallments;
 
@@ -150,23 +146,25 @@ export default function AnalysisScreen() {
     const { startDate, endDate } = getMonthRange(monthData.month, monthData.year);
 
     const [transRes, fixedRes] = await Promise.all([
-      supabase
-        .from('transactions')
-        .select('*, categories(name, icon)')
-        .eq('user_id', user.id)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .order('date', { ascending: false }),
-      supabase
-        .from('fixed_expenses')
-        .select('*, categories(name, icon)')
-        .eq('user_id', user.id)
-        .eq('is_active', true),
+      getDocs(query(
+        collection(db, 'users', user.uid, 'transactions'),
+        where('date', '>=', startDate),
+        where('date', '<=', endDate)
+      )),
+      getDocs(query(collection(db, 'users', user.uid, 'fixedExpenses'), where('is_active', '==', true))),
     ]);
 
-    const transactions = (transRes.data || []) as TransactionDetail[];
+    const transactions: TransactionDetail[] = transRes.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    })) as TransactionDetail[];
     setDetailTransactions(transactions);
-    setDetailFixed((fixedRes.data || []) as FixedDetail[]);
+
+    const fixedData: FixedDetail[] = fixedRes.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    })) as FixedDetail[];
+    setDetailFixed(fixedData);
 
     const categoryMap = new Map<string, { name: string; icon: string; total: number }>();
     for (const t of transactions) {

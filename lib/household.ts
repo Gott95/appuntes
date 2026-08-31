@@ -1,4 +1,17 @@
-import { supabase } from './supabase';
+import {
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  writeBatch,
+} from 'firebase/firestore';
+import { db } from './firebase';
 
 export interface Household {
   id: string;
@@ -47,113 +60,149 @@ function generateInviteCode(): string {
 export async function createHousehold(userId: string, name: string): Promise<Household | null> {
   const inviteCode = generateInviteCode();
 
-  const { data, error } = await supabase
-    .from('households')
-    .insert({ name, invite_code: inviteCode, created_by: userId } as any)
-    .select()
-    .single();
+  try {
+    const householdsRef = collection(db, 'households');
+    const docRef = await addDoc(householdsRef, {
+      name,
+      invite_code: inviteCode,
+      created_by: userId,
+      settings: {
+        shared_expenses: false,
+        shared_goals: false,
+        shared_budget: false,
+        chat_enabled: true,
+      },
+      created_at: new Date().toISOString(),
+    });
 
-  if (error) {
-    console.error('Error creating household:', error.message);
+    const membersRef = collection(db, 'households', docRef.id, 'members');
+    await addDoc(membersRef, {
+      household_id: docRef.id,
+      user_id: userId,
+      role: 'admin',
+      joined_at: new Date().toISOString(),
+    });
+
+    return {
+      id: docRef.id,
+      name,
+      invite_code: inviteCode,
+      created_by: userId,
+      settings: {
+        shared_expenses: false,
+        shared_goals: false,
+        shared_budget: false,
+        chat_enabled: true,
+      },
+      created_at: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('Error creating household:', error);
     return null;
   }
-  if (!data) return null;
-
-  const householdData = data as any;
-
-  const { error: memberError } = await supabase.from('household_members').insert({
-    household_id: householdData.id,
-    user_id: userId,
-    role: 'admin',
-  } as any);
-
-  if (memberError) {
-    console.error('Error adding member:', memberError.message);
-  }
-
-  return householdData as Household;
 }
 
 export async function joinHousehold(userId: string, inviteCode: string): Promise<Household | null> {
-  const { data: household } = await supabase
-    .from('households')
-    .select('*')
-    .eq('invite_code', inviteCode.toUpperCase())
-    .single();
+  const householdsRef = collection(db, 'households');
+  const q = query(householdsRef, where('invite_code', '==', inviteCode.toUpperCase()));
+  const snapshot = await getDocs(q);
 
-  if (!household) return null;
+  if (snapshot.empty) return null;
 
-  const hhData = household as any;
+  const householdDoc = snapshot.docs[0];
+  const householdData = householdDoc.data() as Household;
 
-  const { error } = await supabase.from('household_members').insert({
-    household_id: hhData.id,
-    user_id: userId,
-    role: 'member',
-  } as any);
+  try {
+    const membersRef = collection(db, 'households', householdDoc.id, 'members');
+    await addDoc(membersRef, {
+      household_id: householdDoc.id,
+      user_id: userId,
+      role: 'member',
+      joined_at: new Date().toISOString(),
+    });
 
-  if (error) return null;
+    await logActivity(householdDoc.id, userId, 'member_joined', {});
 
-  await logActivity(hhData.id, userId, 'member_joined', {});
-
-  return hhData as Household;
+    const { id: _hhId, ...hhRest } = householdData as any;
+    return { id: householdDoc.id, ...hhRest } as Household;
+  } catch (error) {
+    console.error('Error joining household:', error);
+    return null;
+  }
 }
 
 export async function getUserHousehold(userId: string): Promise<Household | null> {
-  const { data: membership } = await supabase
-    .from('household_members')
-    .select('household_id')
-    .eq('user_id', userId)
-    .single();
+  const membersRef = collection(db, 'households');
+  const q = query(membersRef, where('created_by', '==', userId));
+  const snapshot = await getDocs(q);
 
-  if (!membership) return null;
+  if (!snapshot.empty) {
+    const hhDoc = snapshot.docs[0];
+    return { id: hhDoc.id, ...hhDoc.data() } as Household;
+  }
 
-  const { data } = await supabase
-    .from('households')
-    .select('*')
-    .eq('id', (membership as any).household_id)
-    .single();
+  const allHouseholds = await getDocs(collection(db, 'households'));
+  for (const hhDoc of allHouseholds.docs) {
+    const membersRef = collection(db, 'households', hhDoc.id, 'members');
+    const memberQ = query(membersRef, where('user_id', '==', userId));
+    const memberSnap = await getDocs(memberQ);
 
-  return data ? (data as Household) : null;
+    if (!memberSnap.empty) {
+      return { id: hhDoc.id, ...hhDoc.data() } as Household;
+    }
+  }
+
+  return null;
 }
 
 export async function getHouseholdMembers(householdId: string): Promise<HouseholdMember[]> {
-  const { data } = await supabase
-    .from('household_members')
-    .select('*, profiles(email)')
-    .eq('household_id', householdId);
+  const membersRef = collection(db, 'households', householdId, 'members');
+  const snapshot = await getDocs(membersRef);
 
-  return (data || []) as HouseholdMember[];
+  const members: HouseholdMember[] = [];
+  for (const memberDoc of snapshot.docs) {
+    const memberData = memberDoc.data();
+    const userRef = doc(db, 'users', memberData.user_id);
+    const userSnap = await getDoc(userRef);
+
+    members.push({
+      id: memberDoc.id,
+      ...memberData,
+      profiles: userSnap.exists() ? { email: userSnap.data().email } : null,
+    } as HouseholdMember);
+  }
+
+  return members;
 }
 
 export async function removeMember(householdId: string, userId: string): Promise<void> {
-  await supabase
-    .from('household_members')
-    .delete()
-    .eq('household_id', householdId)
-    .eq('user_id', userId);
+  const membersRef = collection(db, 'households', householdId, 'members');
+  const q = query(membersRef, where('user_id', '==', userId));
+  const snapshot = await getDocs(q);
+
+  for (const memDoc of snapshot.docs) {
+    await deleteDoc(memDoc.ref);
+  }
 }
 
 export async function updateHouseholdSettings(
   householdId: string,
   settings: Partial<HouseholdSettings>
 ): Promise<void> {
-  const { data: current } = await supabase
-    .from('households')
-    .select('settings')
-    .eq('id', householdId)
-    .single();
+  const householdRef = doc(db, 'households', householdId);
+  const householdSnap = await getDoc(householdRef);
 
-  const currentSettings = (current as any)?.settings || {};
+  if (!householdSnap.exists()) return;
+
+  const currentSettings = householdSnap.data()?.settings || {};
   const updated = { ...currentSettings, ...settings };
 
-  await (supabase as any)
-    .from('households')
-    .update({ settings: updated })
-    .eq('id', householdId);
+  await updateDoc(householdRef, { settings: updated });
 }
 
 export async function deleteHousehold(householdId: string): Promise<void> {
-  await supabase.from('households').delete().eq('id', householdId);
+  const householdRef = doc(db, 'households', householdId);
+  await deleteDoc(householdRef);
 }
 
 export async function logActivity(
@@ -162,23 +211,37 @@ export async function logActivity(
   type: string,
   data: any
 ): Promise<void> {
-  await supabase.from('household_activity').insert({
+  const activityRef = collection(db, 'households', householdId, 'activity');
+  await addDoc(activityRef, {
     household_id: householdId,
     user_id: userId,
     type,
     data,
-  } as any);
+    created_at: new Date().toISOString(),
+  });
 }
 
-export async function getActivity(householdId: string, limit = 20): Promise<HouseholdActivity[]> {
-  const { data } = await supabase
-    .from('household_activity')
-    .select('*, profiles(email)')
-    .eq('household_id', householdId)
-    .order('created_at', { ascending: false })
-    .limit(limit);
+export async function getActivity(householdId: string, limitCount = 20): Promise<HouseholdActivity[]> {
+  const activityRef = collection(db, 'households', householdId, 'activity');
+  const q = query(activityRef, orderBy('created_at', 'desc'));
+  const snapshot = await getDocs(q);
 
-  return (data || []) as HouseholdActivity[];
+  const activities: HouseholdActivity[] = [];
+  const docs = snapshot.docs.slice(0, limitCount);
+
+  for (const actDoc of docs) {
+    const actData = actDoc.data();
+    const userRef = doc(db, 'users', actData.user_id);
+    const userSnap = await getDoc(userRef);
+
+    activities.push({
+      id: actDoc.id,
+      ...actData,
+      profiles: userSnap.exists() ? { email: userSnap.data().email } : null,
+    } as HouseholdActivity);
+  }
+
+  return activities;
 }
 
 export async function getSharedTransactions(
@@ -186,63 +249,87 @@ export async function getSharedTransactions(
   startDate: string,
   endDate: string
 ): Promise<any[]> {
-  const { data: members } = await supabase
-    .from('household_members')
-    .select('user_id')
-    .eq('household_id', householdId);
+  const membersRef = collection(db, 'households', householdId, 'members');
+  const membersSnap = await getDocs(membersRef);
 
-  if (!members || members.length === 0) return [];
+  if (membersSnap.empty) return [];
 
-  const userIds = members.map((m: any) => m.user_id);
+  const userIds = membersSnap.docs.map((doc) => doc.data().user_id);
+  const transactions: any[] = [];
 
-  const { data } = await supabase
-    .from('transactions')
-    .select('*, profiles(email)')
-    .eq('is_shared', true)
-    .in('user_id', userIds)
-    .gte('date', startDate)
-    .lte('date', endDate)
-    .order('date', { ascending: false });
+  for (const userId of userIds) {
+    const transRef = collection(db, 'users', userId, 'transactions');
+    const q = query(
+      transRef,
+      where('is_shared', '==', true),
+      where('date', '>=', startDate),
+      where('date', '<=', endDate)
+    );
+    const snapshot = await getDocs(q);
 
-  return data || [];
+    for (const transDoc of snapshot.docs) {
+      const userRef = doc(db, 'users', userId);
+      const userSnap = await getDoc(userRef);
+
+      transactions.push({
+        id: transDoc.id,
+        ...transDoc.data(),
+        profiles: userSnap.exists() ? { email: userSnap.data().email } : null,
+      });
+    }
+  }
+
+  return transactions.sort((a, b) => (b.date > a.date ? 1 : -1));
 }
 
 export async function getSharedExpenses(householdId: string): Promise<any[]> {
-  const { data: members } = await supabase
-    .from('household_members')
-    .select('user_id')
-    .eq('household_id', householdId);
+  const membersRef = collection(db, 'households', householdId, 'members');
+  const membersSnap = await getDocs(membersRef);
 
-  if (!members || members.length === 0) return [];
+  if (membersSnap.empty) return [];
 
-  const userIds = members.map((m: any) => m.user_id);
+  const userIds = membersSnap.docs.map((m) => m.data().user_id);
+  const expenses: any[] = [];
 
-  const { data } = await supabase
-    .from('fixed_expenses')
-    .select('*, categories(name, icon)')
-    .in('user_id', userIds)
-    .eq('is_active', true);
+  for (const userId of userIds) {
+    const expRef = collection(db, 'users', userId, 'fixedExpenses');
+    const q = query(expRef, where('is_active', '==', true));
+    const snapshot = await getDocs(q);
 
-  return data || [];
+    for (const expDoc of snapshot.docs) {
+      expenses.push({
+        id: expDoc.id,
+        ...expDoc.data(),
+      });
+    }
+  }
+
+  return expenses;
 }
 
 export async function getSharedSavingsGoals(householdId: string): Promise<any[]> {
-  const { data: members } = await supabase
-    .from('household_members')
-    .select('user_id')
-    .eq('household_id', householdId);
+  const membersRef = collection(db, 'households', householdId, 'members');
+  const membersSnap = await getDocs(membersRef);
 
-  if (!members || members.length === 0) return [];
+  if (membersSnap.empty) return [];
 
-  const userIds = members.map((m: any) => m.user_id);
+  const userIds = membersSnap.docs.map((m) => m.data().user_id);
+  const goals: any[] = [];
 
-  const { data } = await supabase
-    .from('savings_goals')
-    .select('*')
-    .in('user_id', userIds)
-    .eq('is_completed', false);
+  for (const userId of userIds) {
+    const goalsRef = collection(db, 'users', userId, 'savingsGoals');
+    const q = query(goalsRef, where('is_completed', '==', false));
+    const snapshot = await getDocs(q);
 
-  return data || [];
+    for (const goalDoc of snapshot.docs) {
+      goals.push({
+        id: goalDoc.id,
+        ...goalDoc.data(),
+      });
+    }
+  }
+
+  return goals;
 }
 
 export function isHouseholdAdmin(members: HouseholdMember[], userId: string): boolean {

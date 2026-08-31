@@ -8,14 +8,12 @@ import 'react-native-reanimated';
 import { AuthProvider, useAuthContext } from '@/lib/auth-context';
 import { UpdateProvider } from '@/lib/update-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useOTAUpdates } from '@/hooks/useOTAUpdates';
 
 function RootLayoutNav() {
   const { session, profile, loading } = useAuthContext();
   const segments = useSegments();
   const router = useRouter();
   const colorScheme = useColorScheme();
-  useOTAUpdates();
 
   useEffect(() => {
     if (Platform.OS === 'android') {

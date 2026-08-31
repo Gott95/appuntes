@@ -1,4 +1,5 @@
-import { supabase } from './supabase';
+import { doc, getDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from './firebase';
 
 export function getWeekOfMonth(date: Date): number {
   const day = date.getDate();
@@ -17,20 +18,16 @@ export function getWeekRange(month: number, year: number, week: number): { start
 }
 
 export async function getMonthlyBudget(userId: string): Promise<number> {
-  const { data } = await supabase
-    .from('profiles')
-    .select('monthly_budget')
-    .eq('id', userId)
-    .single();
+  const userRef = doc(db, 'users', userId);
+  const userSnap = await getDoc(userRef);
 
-  return (data as any)?.monthly_budget || 0;
+  if (!userSnap.exists()) return 0;
+  return userSnap.data()?.monthly_budget || 0;
 }
 
 export async function setMonthlyBudget(userId: string, amount: number): Promise<void> {
-  await (supabase as any)
-    .from('profiles')
-    .update({ monthly_budget: amount })
-    .eq('id', userId);
+  const userRef = doc(db, 'users', userId);
+  await updateDoc(userRef, { monthly_budget: amount });
 }
 
 async function getMonthlySpendingThrough(userId: string, month: number, year: number, week: number): Promise<number> {
@@ -39,29 +36,31 @@ async function getMonthlySpendingThrough(userId: string, month: number, year: nu
   const pad = (n: number) => String(n).padStart(2, '0');
   const { endDate } = getWeekRange(month, year, week);
 
-  const { data } = await supabase
-    .from('transactions')
-    .select('amount')
-    .eq('user_id', userId)
-    .eq('type', 'expense')
-    .gte('date', `${year}-${pad(month)}-01`)
-    .lte('date', endDate);
+  const transactionsRef = collection(db, 'users', userId, 'transactions');
+  const q = query(
+    transactionsRef,
+    where('type', '==', 'expense'),
+    where('date', '>=', `${year}-${pad(month)}-01`),
+    where('date', '<=', endDate)
+  );
 
-  return (data || []).reduce((sum: number, t: any) => sum + t.amount, 0);
+  const snapshot = await getDocs(q);
+  return snapshot.docs.reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
 }
 
 export async function getWeeklySpending(userId: string, month: number, year: number, week: number): Promise<number> {
   const { startDate, endDate } = getWeekRange(month, year, week);
 
-  const { data } = await supabase
-    .from('transactions')
-    .select('amount')
-    .eq('user_id', userId)
-    .eq('type', 'expense')
-    .gte('date', startDate)
-    .lte('date', endDate);
+  const transactionsRef = collection(db, 'users', userId, 'transactions');
+  const q = query(
+    transactionsRef,
+    where('type', '==', 'expense'),
+    where('date', '>=', startDate),
+    where('date', '<=', endDate)
+  );
 
-  return (data || []).reduce((sum: number, t: any) => sum + t.amount, 0);
+  const snapshot = await getDocs(q);
+  return snapshot.docs.reduce((sum, doc) => sum + (doc.data().amount || 0), 0);
 }
 
 export interface WeeklyBudgetResult {

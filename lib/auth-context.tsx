@@ -1,12 +1,12 @@
 import { createContext, useContext, ReactNode, useEffect, useRef } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import { useAuth as useAuthHook, UserProfile } from '@/hooks/useAuth';
-import { Session, User } from '@supabase/supabase-js';
+import { User } from 'firebase/auth';
 
 const TIMEOUT_MS = 5 * 60 * 1000;
 
 interface AuthContextType {
-  session: Session | null;
+  session: { user: User } | null;
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, useColorScheme, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { useAuthContext } from '@/lib/auth-context';
 import { Colors } from '@/lib/theme';
 import { getCurrentMonth, getMonthRange } from '@/lib/utils';
@@ -50,69 +51,52 @@ export default function PreloadScreen() {
       await new Promise((r) => setTimeout(r, 300));
 
       setStatus('Cargando salario...');
-      await supabase
-        .from('salary_entries')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('month', month)
-        .eq('year', year);
-
+      const salaryRef = collection(db, 'users', user.uid, 'salaryEntries');
+      const salaryQ = query(
+        salaryRef,
+        where('month', '==', month),
+        where('year', '==', year)
+      );
+      await getDocs(salaryQ);
       await new Promise((r) => setTimeout(r, 200));
 
       setStatus('Cargando gastos fijos...');
-      await supabase
-        .from('fixed_expenses')
-        .select('*, categories(name, icon)')
-        .eq('user_id', user.id)
-        .eq('is_active', true);
-
+      const expensesRef = collection(db, 'users', user.uid, 'fixedExpenses');
+      const expensesQ = query(expensesRef, where('is_active', '==', true));
+      await getDocs(expensesQ);
       await new Promise((r) => setTimeout(r, 200));
 
       setStatus('Cargando transacciones...');
-      await supabase
-        .from('transactions')
-        .select('*')
-        .eq('user_id', user.id)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .order('date', { ascending: false });
-
+      const transRef = collection(db, 'users', user.uid, 'transactions');
+      const transQ = query(
+        transRef,
+        where('date', '>=', startDate),
+        where('date', '<=', endDate)
+      );
+      await getDocs(transQ);
       await new Promise((r) => setTimeout(r, 200));
 
       setStatus('Cargando categorías...');
-      await supabase
-        .from('categories')
-        .select('*')
-        .eq('user_id', user.id);
-
+      const catsRef = collection(db, 'users', user.uid, 'categories');
+      await getDocs(catsRef);
       await new Promise((r) => setTimeout(r, 200));
 
       setStatus('Cargando presupuesto...');
-      const budget = await getMonthlyBudget(user.id);
+      const budget = await getMonthlyBudget(user.uid);
       if (budget > 0) {
-        await calculateAndAdjustBudgets(user.id, month, year, budget);
+        await calculateAndAdjustBudgets(user.uid, month, year, budget);
       }
-
       await new Promise((r) => setTimeout(r, 200));
 
       setStatus('Cargando metas de ahorro...');
-      await getSavingsGoals(user.id);
-
+      await getSavingsGoals(user.uid);
       await new Promise((r) => setTimeout(r, 200));
 
       setStatus('Cargando cuotas...');
       await Promise.all([
-        getMonthlyInstallmentsTotal(user.id, month, year),
-        getAllPlansWithPayments(user.id),
+        getMonthlyInstallmentsTotal(user.uid, month, year),
+        getAllPlansWithPayments(user.uid),
       ]);
-
-      setStatus('Cargando configuración...');
-      await supabase
-        .from('app_config')
-        .select('key, value')
-        .in('key', ['latest_build', 'latest_build_url', 'latest_build_notes']);
-
-      await new Promise((r) => setTimeout(r, 300));
 
       setStatus('¡Listo!');
       await new Promise((r) => setTimeout(r, 400));

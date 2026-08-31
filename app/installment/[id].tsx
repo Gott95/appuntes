@@ -12,6 +12,7 @@ import {
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useAuthContext } from '../../lib/auth-context';
 import {
   PlanWithPayments,
   InstallmentPayment,
@@ -30,6 +31,7 @@ import { Colors, BorderRadius, FontSize, FontWeight } from '../../lib/theme';
 export default function InstallmentDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
+  const { user } = useAuthContext();
   const [plan, setPlan] = useState<PlanWithPayments | null>(null);
   const [showAmortization, setShowAmortization] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
@@ -54,10 +56,10 @@ export default function InstallmentDetailScreen() {
   const [savingExtra, setSavingExtra] = useState(false);
 
   const loadPlan = useCallback(async () => {
-    if (!id) return;
-    const data = await getPlanWithPayments(id);
+    if (!id || !user) return;
+    const data = await getPlanWithPayments(id, user.uid);
     setPlan(data);
-  }, [id]);
+  }, [id, user]);
 
   useEffect(() => {
     loadPlan();
@@ -72,14 +74,14 @@ export default function InstallmentDetailScreen() {
   };
 
   const confirmPayment = async () => {
-    if (!selectedPayment) return;
+    if (!selectedPayment || !user) return;
     const amount = parseFloat(payAmount);
     if (isNaN(amount) || amount <= 0) {
       Alert.alert('Error', 'Ingresa un monto válido');
       return;
     }
     const dateStr = payDate.toISOString().split('T')[0];
-    const success = await markPaymentAsPaid(selectedPayment.id, amount, dateStr, payMethod);
+    const success = await markPaymentAsPaid(selectedPayment.id, amount, dateStr, user.uid, selectedPayment.plan_id, payMethod);
     if (success) {
       setShowPayModal(false);
       setSelectedPayment(null);
@@ -99,7 +101,8 @@ export default function InstallmentDetailScreen() {
           text: 'Desmarcar',
           style: 'destructive',
           onPress: async () => {
-            await markPaymentAsPending(payment.id);
+            if (!user) return;
+            await markPaymentAsPending(payment.id, user.uid, payment.plan_id);
             loadPlan();
           },
         },
@@ -117,7 +120,8 @@ export default function InstallmentDetailScreen() {
           text: 'Eliminar',
           style: 'destructive',
           onPress: async () => {
-            await deleteInstallmentPlan(plan!.id);
+            if (!user) return;
+            await deleteInstallmentPlan(plan!.id, user.uid);
             router.back();
           },
         },
@@ -135,7 +139,7 @@ export default function InstallmentDetailScreen() {
   };
 
   const handleSaveEdit = async () => {
-    if (!plan || !editName.trim()) {
+    if (!plan || !editName.trim() || !user) {
       Alert.alert('Error', 'Ingresa el nombre');
       return;
     }
@@ -145,6 +149,7 @@ export default function InstallmentDetailScreen() {
       editName.trim(),
       editStore.trim(),
       editStartDate.toISOString().split('T')[0],
+      user.uid,
       plan.is_shared ? editPartnerName.trim() : undefined
     );
     setSaving(false);
@@ -165,7 +170,7 @@ export default function InstallmentDetailScreen() {
   };
 
   const confirmExtraPayment = async () => {
-    if (!extraPayment) return;
+    if (!extraPayment || !user) return;
     const amount = parseFloat(extraAmount);
     if (isNaN(amount) || amount <= 0) {
       Alert.alert('Error', 'Ingresa un monto válido');
@@ -177,7 +182,7 @@ export default function InstallmentDetailScreen() {
     }
     setSavingExtra(true);
     const dateStr = extraDate.toISOString().split('T')[0];
-    const success = await applyExtraPayment(extraPayment.id, amount, dateStr, extraMethod);
+    const success = await applyExtraPayment(extraPayment.id, amount, dateStr, user.uid, extraPayment.plan_id, extraMethod);
     setSavingExtra(false);
     if (success) {
       setShowExtraModal(false);
