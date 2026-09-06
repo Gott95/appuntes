@@ -1,5 +1,6 @@
 import {
   collection,
+  collectionGroup,
   doc,
   getDocs,
   getDoc,
@@ -132,23 +133,30 @@ export async function joinHousehold(userId: string, inviteCode: string): Promise
 }
 
 export async function getUserHousehold(userId: string): Promise<Household | null> {
-  const membersRef = collection(db, 'households');
-  const q = query(membersRef, where('created_by', '==', userId));
-  const snapshot = await getDocs(q);
+  // First check if user created a household
+  const householdsRef = collection(db, 'households');
+  const createdQ = query(householdsRef, where('created_by', '==', userId));
+  const createdSnap = await getDocs(createdQ);
 
-  if (!snapshot.empty) {
-    const hhDoc = snapshot.docs[0];
+  if (!createdSnap.empty) {
+    const hhDoc = createdSnap.docs[0];
     return { id: hhDoc.id, ...hhDoc.data() } as Household;
   }
 
-  const allHouseholds = await getDocs(collection(db, 'households'));
-  for (const hhDoc of allHouseholds.docs) {
-    const membersRef = collection(db, 'households', hhDoc.id, 'members');
-    const memberQ = query(membersRef, where('user_id', '==', userId));
-    const memberSnap = await getDocs(memberQ);
+  // Use collection group query to find household via members subcollection
+  const memberQ = query(
+    collectionGroup(db, 'members'),
+    where('user_id', '==', userId)
+  );
+  const memberSnap = await getDocs(memberQ);
 
-    if (!memberSnap.empty) {
-      return { id: hhDoc.id, ...hhDoc.data() } as Household;
+  if (!memberSnap.empty) {
+    // Get the parent household document
+    const memberDoc = memberSnap.docs[0];
+    const householdRef = doc(db, 'households', memberDoc.ref.parent.parent!.id);
+    const householdSnap = await getDoc(householdRef);
+    if (householdSnap.exists()) {
+      return { id: householdSnap.id, ...householdSnap.data() } as Household;
     }
   }
 
